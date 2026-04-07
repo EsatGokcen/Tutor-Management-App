@@ -1,0 +1,79 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+Packages/
+Package.pins
+Package.resolved
+# Keep Package.resolved tracked for apps if you want reproducible builds.
+# Ignore it only if that fits your workflow.
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# Archives
+*.xcarchive
+
+# App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# C / C++ build artifacts
+*.o
+*.obj
+*.so
+*.a
+*.out
+*.gch
+*.pch
+*.dylib
+*.dll
+*.exe
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+Makefile
+
+# Logs
+*.log
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+
+# Editor
+.vscode/
+.idea/
