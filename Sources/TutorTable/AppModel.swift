@@ -8,7 +8,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessions: [LessonSession] = []
     @Published private(set) var settings = AppSettings()
     @Published private(set) var reminderStatusText = "Not requested yet"
-    @Published private(set) var activeHotKeyDescription = "Command + Option + M"
+    @Published private(set) var activeHotKeyDescription = "Command + Option + T"
     @Published var bannerMessage: String?
 
     let storagePaths = StoragePaths()
@@ -27,7 +27,7 @@ final class AppModel: ObservableObject {
         }
 
         audioRecorder = AudioRecorder(audioDirectory: storagePaths.audioDirectory)
-        launcherManager = LauncherManager(rootDirectory: storagePaths.rootDirectory)
+        launcherManager = LauncherManager()
 
         audioRecorder.onRecordingFinished = { [weak self] fileName in
             self?.bannerMessage = "Saved audio note: \(fileName)"
@@ -89,13 +89,18 @@ final class AppModel: ObservableObject {
         StudentDraft(defaults: settings)
     }
 
-    func newSessionDraft() -> SessionDraft {
-        var draft = SessionDraft()
-        if let firstStudent = studentsSorted.first {
-            draft.studentID = firstStudent.id
-            draft.paymentAmount = firstStudent.hourlyRate
+    func newSessionDraft(preferredStudentID: UUID? = nil) -> SessionDraft {
+        let preferredStudent = preferredStudentID.flatMap { student(for: $0) } ?? studentsSorted.first
+        return SessionDraft(defaults: settings, student: preferredStudent)
+    }
+
+    func copiedSessionDraft(from sessionID: UUID) -> SessionDraft? {
+        guard let session = sessions.first(where: { $0.id == sessionID }) else {
+            return nil
         }
-        return draft
+
+        bannerMessage = "Copied the session. Change the dates and save to create a new one."
+        return SessionDraft(copying: session)
     }
 
     func studentName(for studentID: UUID) -> String {
@@ -123,15 +128,78 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func incomeEarned(in timeframe: IncomeTimeframe) -> Double {
+    func sessions(in timeframe: IncomeTimeframe) -> [LessonSession] {
         sessions
-            .filter { $0.paymentStatus == .paid }
             .filter { timeframe.contains($0.startAt) }
+            .sorted { $0.startAt > $1.startAt }
+    }
+
+    func incomeEarned(in timeframe: IncomeTimeframe) -> Double {
+        sessions(in: timeframe)
+            .filter { $0.paymentStatus.isPaid }
             .reduce(0) { $0 + $1.paymentAmount }
     }
 
     func paidSessionCount(in timeframe: IncomeTimeframe) -> Int {
-        sessions.filter { $0.paymentStatus == .paid && timeframe.contains($0.startAt) }.count
+        sessions(in: timeframe).filter { $0.paymentStatus.isPaid }.count
+    }
+
+    func paymentSummary(in timeframe: IncomeTimeframe) -> PaymentSummary {
+        sessions(in: timeframe).reduce(into: PaymentSummary()) { summary, session in
+            switch session.paymentStatus {
+            case .paid:
+                summary.collectedAmount += session.paymentAmount
+                summary.paidSessionCount += 1
+            case .unpaid:
+                summary.unpaidAmount += session.paymentAmount
+                summary.unpaidSessionCount += 1
+            case .partiallyPaid:
+                summary.partiallyPaidSessionValue += session.paymentAmount
+                summary.partiallyPaidSessionCount += 1
+            }
+        }
+    }
+
+    func paymentAttentionSessions(in timeframe: IncomeTimeframe) -> [LessonSession] {
+        sessions(in: timeframe)
+            .filter { $0.paymentStatus.needsAttention }
+            .sorted { $0.startAt < $1.startAt }
+    }
+
+    func studentPaymentReports(in timeframe: IncomeTimeframe) -> [StudentPaymentReport] {
+        let sessionsByStudent = Dictionary(grouping: sessions(in: timeframe), by: \.studentID)
+
+        return sessionsByStudent.compactMap { studentID, studentSessions in
+            guard let student = student(for: studentID) else {
+                return nil
+            }
+
+            let collectedAmount = studentSessions
+                .filter { $0.paymentStatus == .paid }
+                .reduce(0) { $0 + $1.paymentAmount }
+            let unpaidAmount = studentSessions
+                .filter { $0.paymentStatus == .unpaid }
+                .reduce(0) { $0 + $1.paymentAmount }
+            let partiallyPaidSessionValue = studentSessions
+                .filter { $0.paymentStatus == .partiallyPaid }
+                .reduce(0) { $0 + $1.paymentAmount }
+            let paidSessionCount = studentSessions.filter { $0.paymentStatus == .paid }.count
+            let openSessionCount = studentSessions.filter { $0.paymentStatus.needsAttention }.count
+
+            return StudentPaymentReport(
+                studentID: student.id,
+                studentName: student.fullName,
+                collectedAmount: collectedAmount,
+                unpaidAmount: unpaidAmount,
+                partiallyPaidSessionValue: partiallyPaidSessionValue,
+                paidSessionCount: paidSessionCount,
+                openSessionCount: openSessionCount
+            )
+        }
+        .sorted {
+            ($0.collectedAmount + $0.unpaidAmount + $0.partiallyPaidSessionValue) >
+            ($1.collectedAmount + $1.unpaidAmount + $1.partiallyPaidSessionValue)
+        }
     }
 
     @discardableResult
@@ -201,11 +269,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func saveSettings(defaultSubject: String, defaultHourlyRate: Double) {
+    func saveSettings(
+        defaultSubject: String,
+        defaultHourlyRate: Double,
+        defaultSessionType: String,
+        defaultSessionLocation: String,
+        defaultSessionPaymentMethod: String
+    ) {
         let trimmedSubject = defaultSubject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSessionType = defaultSessionType.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.defaultStudentSubject = trimmedSubject.isEmpty ? AppSettings.defaultStudentSubjectValue : trimmedSubject
         settings.defaultStudentHourlyRate = defaultHourlyRate
-        bannerMessage = "Saved your default student subject and hourly rate."
+        settings.defaultSessionType = trimmedSessionType.isEmpty ? AppSettings.defaultSessionTypeValue : trimmedSessionType
+        settings.defaultSessionLocation = defaultSessionLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.defaultSessionPaymentMethod = defaultSessionPaymentMethod.trimmingCharacters(in: .whitespacesAndNewlines)
+        bannerMessage = "Saved your student and session defaults."
         persist()
     }
 

@@ -4,6 +4,7 @@ import Foundation
 struct LauncherHotKeyRegistrationResult {
     let displayName: String
     let didRegister: Bool
+    let registrationErrorCode: Int32?
 }
 
 final class LauncherHotKeyManager {
@@ -18,10 +19,11 @@ final class LauncherHotKeyManager {
         unregister()
 
         let candidates = [
-            (UInt32(kVK_ANSI_M), UInt32(cmdKey | optionKey), "Command + Option + M"),
-            (UInt32(kVK_ANSI_M), UInt32(cmdKey | controlKey), "Command + Control + M"),
+            (UInt32(kVK_ANSI_T), UInt32(cmdKey | optionKey), "Command + Option + T"),
+            (UInt32(kVK_ANSI_T), UInt32(cmdKey | controlKey), "Command + Control + T"),
             (UInt32(kVK_ANSI_T), UInt32(cmdKey | shiftKey), "Command + Shift + T")
         ]
+        var lastErrorCode: Int32?
 
         for (index, candidate) in candidates.enumerated() {
             let hotKeyID = EventHotKeyID(signature: hotKeySignature, id: UInt32(index + 1))
@@ -35,13 +37,20 @@ final class LauncherHotKeyManager {
             )
 
             if status == noErr {
-                return LauncherHotKeyRegistrationResult(displayName: candidate.2, didRegister: true)
+                return LauncherHotKeyRegistrationResult(
+                    displayName: candidate.2,
+                    didRegister: true,
+                    registrationErrorCode: nil
+                )
             }
+
+            lastErrorCode = status
         }
 
         return LauncherHotKeyRegistrationResult(
             displayName: "Unavailable (use the menu bar icon to open TutorTable)",
-            didRegister: false
+            didRegister: false,
+            registrationErrorCode: lastErrorCode
         )
     }
 
@@ -74,7 +83,7 @@ final class LauncherHotKeyManager {
     }
 
     private var eventTarget: EventTargetRef {
-        GetEventDispatcherTarget()
+        GetApplicationEventTarget()
     }
 
     private func unregister() {

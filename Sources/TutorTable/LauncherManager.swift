@@ -7,10 +7,16 @@ struct LauncherHotKeyStatus: Codable {
 }
 
 final class LauncherManager {
+    private let launcherBundleIdentifier = "com.esatgokcen.tutortable.launcher"
     private let statusFile: URL
 
-    init(rootDirectory: URL) {
-        statusFile = rootDirectory.appendingPathComponent("hotkey-status.json")
+    init(fileManager: FileManager = .default) {
+        let applicationSupportDirectory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser
+        statusFile = applicationSupportDirectory
+            .appendingPathComponent("TutorTable", isDirectory: true)
+            .appendingPathComponent("System", isDirectory: true)
+            .appendingPathComponent("hotkey-status.json")
     }
 
     func startLauncherIfNeeded() {
@@ -18,9 +24,13 @@ final class LauncherManager {
             return
         }
 
+        for runningApp in NSRunningApplication.runningApplications(withBundleIdentifier: launcherBundleIdentifier) {
+            runningApp.forceTerminate()
+        }
+
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
-        configuration.createsNewApplicationInstance = false
+        configuration.createsNewApplicationInstance = true
 
         NSWorkspace.shared.openApplication(at: launcherURL, configuration: configuration) { _, _ in }
     }
@@ -34,7 +44,7 @@ final class LauncherManager {
     }
 
     var fallbackDisplayName: String {
-        "Command + Option + M"
+        "Command + Option + T"
     }
 
     private var launcherAppURL: URL? {

@@ -17,14 +17,56 @@ enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
             return "Paid"
         }
     }
+
+    var isPaid: Bool {
+        self == .paid
+    }
+
+    var needsAttention: Bool {
+        self != .paid
+    }
 }
 
 struct AppSettings: Codable, Equatable {
     static let defaultStudentSubjectValue = "Electric Guitar"
     static let defaultStudentHourlyRateValue = 0.0
+    static let defaultSessionTypeValue = "Electric Guitar Lesson"
+    static let defaultSessionLocationValue = ""
+    static let defaultSessionPaymentMethodValue = ""
 
     var defaultStudentSubject: String = defaultStudentSubjectValue
     var defaultStudentHourlyRate: Double = defaultStudentHourlyRateValue
+    var defaultSessionType: String = defaultSessionTypeValue
+    var defaultSessionLocation: String = defaultSessionLocationValue
+    var defaultSessionPaymentMethod: String = defaultSessionPaymentMethodValue
+
+    private enum CodingKeys: String, CodingKey {
+        case defaultStudentSubject
+        case defaultStudentHourlyRate
+        case defaultSessionType
+        case defaultSessionLocation
+        case defaultSessionPaymentMethod
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        defaultStudentSubject = try container.decodeIfPresent(String.self, forKey: .defaultStudentSubject) ?? Self.defaultStudentSubjectValue
+        defaultStudentHourlyRate = try container.decodeIfPresent(Double.self, forKey: .defaultStudentHourlyRate) ?? Self.defaultStudentHourlyRateValue
+        defaultSessionType = try container.decodeIfPresent(String.self, forKey: .defaultSessionType) ?? Self.defaultSessionTypeValue
+        defaultSessionLocation = try container.decodeIfPresent(String.self, forKey: .defaultSessionLocation) ?? Self.defaultSessionLocationValue
+        defaultSessionPaymentMethod = try container.decodeIfPresent(String.self, forKey: .defaultSessionPaymentMethod) ?? Self.defaultSessionPaymentMethodValue
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(defaultStudentSubject, forKey: .defaultStudentSubject)
+        try container.encode(defaultStudentHourlyRate, forKey: .defaultStudentHourlyRate)
+        try container.encode(defaultSessionType, forKey: .defaultSessionType)
+        try container.encode(defaultSessionLocation, forKey: .defaultSessionLocation)
+        try container.encode(defaultSessionPaymentMethod, forKey: .defaultSessionPaymentMethod)
+    }
 }
 
 struct Student: Identifiable, Codable, Equatable {
@@ -228,6 +270,14 @@ struct SessionDraft {
 
     init() {}
 
+    init(defaults: AppSettings = AppSettings(), student: Student? = nil) {
+        studentID = student?.id
+        title = defaults.defaultSessionType
+        location = defaults.defaultSessionLocation
+        paymentAmount = student?.hourlyRate ?? 0
+        paymentMethod = defaults.defaultSessionPaymentMethod
+    }
+
     init(session: LessonSession) {
         id = session.id
         studentID = session.studentID
@@ -243,6 +293,18 @@ struct SessionDraft {
         homework = session.homework
         audioNoteFilename = session.audioNoteFilename
         createdAt = session.createdAt
+    }
+
+    init(copying session: LessonSession) {
+        studentID = session.studentID
+        title = session.title
+        location = session.location
+        startAt = session.startAt
+        endAt = session.endAt
+        reminderMinutesBefore = session.reminderMinutesBefore
+        paymentAmount = session.paymentAmount
+        paymentStatus = .unpaid
+        paymentMethod = session.paymentMethod
     }
 
     var isValid: Bool {
@@ -366,4 +428,25 @@ enum AppFormat {
     static func currency(_ amount: Double) -> String {
         currencyFormatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
     }
+}
+
+struct PaymentSummary {
+    var collectedAmount: Double = 0
+    var unpaidAmount: Double = 0
+    var partiallyPaidSessionValue: Double = 0
+    var paidSessionCount: Int = 0
+    var unpaidSessionCount: Int = 0
+    var partiallyPaidSessionCount: Int = 0
+}
+
+struct StudentPaymentReport: Identifiable {
+    let studentID: UUID
+    let studentName: String
+    let collectedAmount: Double
+    let unpaidAmount: Double
+    let partiallyPaidSessionValue: Double
+    let paidSessionCount: Int
+    let openSessionCount: Int
+
+    var id: UUID { studentID }
 }

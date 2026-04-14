@@ -8,7 +8,7 @@ TutorTable is a local-first macOS app for private tutors. It keeps student recor
 - Tracks lesson sessions with payment status and reminder timing
 - Stores lesson notes and homework follow-ups for each session
 - Saves voice notes from your Mac microphone into the same local data folder
-- Registers a global hotkey to bring the app to the front
+- Registers a global hotkey to open TutorTable or bring it to the front
 - Writes everything to a readable JSON file in `~/Documents/TutorTable`
 
 ## Local data
@@ -34,7 +34,7 @@ open build/TutorTable.app
 
 ## Notes
 
-- The app first tries the global hotkey `Command + Option + M`.
-- If macOS or another app already owns that shortcut, TutorTable falls back to `Command + Shift + T`.
+- The app first tries the global hotkey `Command + Option + T`.
+- If macOS or another app already owns that shortcut, TutorTable falls back to another `T` shortcut.
 - Notifications are local macOS notifications, so the first launch asks for reminder access.
 - Microphone recording asks for microphone permission the first time you record a voice note.

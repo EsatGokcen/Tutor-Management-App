@@ -1,8 +1,10 @@
 import AppKit
 import Combine
+import Foundation
 
 @MainActor
 final class TutorTableApplication: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private let showWindowNotification = Notification.Name("com.esatgokcen.tutortable.show-window")
     private weak var appModel: AppModel?
     private weak var window: NSWindow?
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -12,6 +14,12 @@ final class TutorTableApplication: NSObject, NSApplicationDelegate, NSWindowDele
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         configureStatusItem()
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleShowWindowNotification),
+            name: showWindowNotification,
+            object: nil
+        )
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -72,13 +80,22 @@ final class TutorTableApplication: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
 
+        NSApplication.shared.unhide(nil)
         if !window.isVisible {
             window.center()
+        }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
         }
 
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+    }
+
+    @objc
+    private func handleShowWindowNotification() {
+        presentWindow()
     }
 
     @objc
@@ -141,5 +158,9 @@ final class TutorTableApplication: NSObject, NSApplicationDelegate, NSWindowDele
         } else {
             button.toolTip = "TutorTable"
         }
+    }
+
+    deinit {
+        DistributedNotificationCenter.default().removeObserver(self)
     }
 }

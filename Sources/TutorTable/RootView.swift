@@ -27,6 +27,16 @@ struct RootView: View {
                         Label("Sessions", systemImage: "calendar")
                     }
 
+                LessonsCalendarView()
+                    .tabItem {
+                        Label("Calendar", systemImage: "calendar.day.timeline.left")
+                    }
+
+                PaymentsView()
+                    .tabItem {
+                        Label("Payments", systemImage: "sterlingsign.circle")
+                    }
+
                 SettingsView()
                     .tabItem {
                         Label("Settings", systemImage: "gearshape")
@@ -295,6 +305,8 @@ struct SessionsView: View {
     @State private var selectedSessionID: UUID?
     @State private var filter: SessionFilter = .upcoming
     @State private var draft = SessionDraft()
+    @State private var skipNextSelectionReset = false
+    @State private var skipNextStudentRateRefresh = false
 
     var body: some View {
         HStack(spacing: 18) {
@@ -343,6 +355,9 @@ struct SessionsView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     GroupBox("Session Details") {
                         VStack(alignment: .leading, spacing: 14) {
+                            Text("New sessions start with your saved defaults from Settings. You can also copy an existing session and only change the dates.")
+                                .foregroundStyle(.secondary)
+
                             Picker("Student", selection: Binding(
                                 get: { draft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
                                 set: { draft.studentID = $0 }
@@ -352,7 +367,7 @@ struct SessionsView: View {
                                 }
                             }
 
-                            TextField("Session title", text: $draft.title)
+                            TextField("Session type", text: $draft.title)
                             TextField("Location or meeting link", text: $draft.location)
 
                             DatePicker("Starts", selection: $draft.startAt)
@@ -445,6 +460,16 @@ struct SessionsView: View {
                         }
                         .disabled(appModel.students.isEmpty || !draft.isValid)
 
+                        Button("Use Saved Defaults") {
+                            applySavedSessionDefaults()
+                        }
+                        .disabled(appModel.students.isEmpty)
+
+                        Button("Copy Session") {
+                            copySelectedSession()
+                        }
+                        .disabled(selectedSessionID == nil)
+
                         Button("Delete Session") {
                             guard let selectedSessionID else {
                                 return
@@ -469,8 +494,10 @@ struct SessionsView: View {
         .onChange(of: selectedSessionID) { newValue in
             if let newValue, let session = appModel.sessions.first(where: { $0.id == newValue }) {
                 draft = SessionDraft(session: session)
+            } else if skipNextSelectionReset {
+                skipNextSelectionReset = false
             } else {
-                draft = appModel.newSessionDraft()
+                draft = appModel.newSessionDraft(preferredStudentID: draft.studentID)
             }
         }
         .onChange(of: filter) { _ in
@@ -479,16 +506,164 @@ struct SessionsView: View {
                 draft = SessionDraft(session: first)
             } else {
                 selectedSessionID = nil
-                draft = appModel.newSessionDraft()
+                draft = appModel.newSessionDraft(preferredStudentID: draft.studentID)
             }
         }
         .onChange(of: draft.studentID) { newValue in
+            if skipNextStudentRateRefresh {
+                skipNextStudentRateRefresh = false
+                return
+            }
+
             guard selectedSessionID == nil,
                   let newValue,
                   let student = appModel.student(for: newValue) else {
                 return
             }
             draft.paymentAmount = student.hourlyRate
+        }
+        .onChange(of: appModel.settings) { _ in
+            guard selectedSessionID == nil else {
+                return
+            }
+            applySavedSessionDefaults()
+        }
+    }
+
+    private func applySavedSessionDefaults() {
+        let currentStudentID = draft.studentID
+        let currentStartAt = draft.startAt
+        let currentEndAt = draft.endAt
+        let currentReminderMinutesBefore = draft.reminderMinutesBefore
+        let currentPaymentStatus = draft.paymentStatus
+        let currentLessonNotes = draft.lessonNotes
+        let currentHomework = draft.homework
+        let currentAudioNoteFilename = draft.audioNoteFilename
+        let currentCreatedAt = draft.createdAt
+        let currentID = draft.id
+
+        draft = appModel.newSessionDraft(preferredStudentID: currentStudentID)
+        draft.id = currentID
+        draft.createdAt = currentCreatedAt
+        draft.startAt = currentStartAt
+        draft.endAt = currentEndAt
+        draft.reminderMinutesBefore = currentReminderMinutesBefore
+        draft.paymentStatus = currentPaymentStatus
+        draft.lessonNotes = currentLessonNotes
+        draft.homework = currentHomework
+        draft.audioNoteFilename = currentAudioNoteFilename
+    }
+
+    private func copySelectedSession() {
+        guard let selectedSessionID,
+              let copiedDraft = appModel.copiedSessionDraft(from: selectedSessionID) else {
+            return
+        }
+
+        skipNextSelectionReset = true
+        skipNextStudentRateRefresh = true
+        self.selectedSessionID = nil
+        draft = copiedDraft
+    }
+}
+
+struct PaymentsView: View {
+    @EnvironmentObject private var appModel: AppModel
+    @State private var timeframe: IncomeTimeframe = .monthly
+
+    var body: some View {
+        let summary = appModel.paymentSummary(in: timeframe)
+        let openSessions = appModel.paymentAttentionSessions(in: timeframe)
+        let reports = appModel.studentPaymentReports(in: timeframe)
+        let paymentSessions = appModel.sessions(in: timeframe)
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Payments")
+                    .font(.system(size: 28, weight: .semibold))
+
+                Picker("Reporting timeframe", selection: $timeframe) {
+                    ForEach(IncomeTimeframe.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+                    spacing: 18
+                ) {
+                    MetricCard(
+                        title: "Collected",
+                        value: AppFormat.currency(summary.collectedAmount),
+                        subtitle: "\(summary.paidSessionCount) paid session\(summary.paidSessionCount == 1 ? "" : "s")"
+                    )
+                    MetricCard(
+                        title: "Awaiting",
+                        value: AppFormat.currency(summary.unpaidAmount),
+                        subtitle: "\(summary.unpaidSessionCount) unpaid session\(summary.unpaidSessionCount == 1 ? "" : "s")"
+                    )
+                    MetricCard(
+                        title: "Partial",
+                        value: AppFormat.currency(summary.partiallyPaidSessionValue),
+                        subtitle: "\(summary.partiallyPaidSessionCount) session\(summary.partiallyPaidSessionCount == 1 ? "" : "s") marked partial"
+                    )
+                    MetricCard(
+                        title: "Tracked",
+                        value: AppFormat.currency(paymentSessions.reduce(0) { $0 + $1.paymentAmount }),
+                        subtitle: timeframe.subtitle
+                    )
+                }
+
+                GroupBox("Student Payment Report") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if reports.isEmpty {
+                            EmptyStateView(message: "Payment reporting will populate here once your sessions fall into the selected timeframe.")
+                        } else {
+                            ForEach(reports) { report in
+                                StudentPaymentReportRow(report: report)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                }
+
+                GroupBox("Sessions Requiring Attention") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if openSessions.isEmpty {
+                            EmptyStateView(message: "No unpaid or partially paid sessions in the selected timeframe.")
+                        } else {
+                            ForEach(openSessions) { session in
+                                PaymentSessionRow(
+                                    session: session,
+                                    studentName: appModel.studentName(for: session.studentID)
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                }
+
+                GroupBox("Payment Activity") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if paymentSessions.isEmpty {
+                            EmptyStateView(message: "No payment activity for the selected timeframe yet.")
+                        } else {
+                            ForEach(Array(paymentSessions.prefix(12))) { session in
+                                PaymentSessionRow(
+                                    session: session,
+                                    studentName: appModel.studentName(for: session.studentID)
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                }
+            }
+            .padding(.bottom, 20)
         }
     }
 }
@@ -498,6 +673,9 @@ struct SettingsView: View {
 
     @State private var defaultSubject = AppSettings.defaultStudentSubjectValue
     @State private var defaultHourlyRate = AppSettings.defaultStudentHourlyRateValue
+    @State private var defaultSessionType = AppSettings.defaultSessionTypeValue
+    @State private var defaultSessionLocation = AppSettings.defaultSessionLocationValue
+    @State private var defaultSessionPaymentMethod = AppSettings.defaultSessionPaymentMethodValue
 
     var body: some View {
         ScrollView {
@@ -523,17 +701,36 @@ struct SettingsView: View {
                             .frame(width: 160)
                         }
 
-                        HStack {
-                            Button("Save Defaults") {
-                                appModel.saveSettings(defaultSubject: defaultSubject, defaultHourlyRate: defaultHourlyRate)
-                            }
-
-                            Button("Reload Saved Values") {
-                                syncFromSettings()
-                            }
-                        }
                     }
                     .padding(.top, 8)
+                }
+
+                GroupBox("Session Defaults") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("These values prefill new sessions. The copy action in the Sessions tab duplicates an existing lesson so you only need to change the dates.")
+                            .foregroundStyle(.secondary)
+
+                        TextField("Default session type", text: $defaultSessionType)
+                        TextField("Default location", text: $defaultSessionLocation)
+                        TextField("Default payment method", text: $defaultSessionPaymentMethod)
+                    }
+                    .padding(.top, 8)
+                }
+
+                HStack {
+                    Button("Save All Defaults") {
+                        appModel.saveSettings(
+                            defaultSubject: defaultSubject,
+                            defaultHourlyRate: defaultHourlyRate,
+                            defaultSessionType: defaultSessionType,
+                            defaultSessionLocation: defaultSessionLocation,
+                            defaultSessionPaymentMethod: defaultSessionPaymentMethod
+                        )
+                    }
+
+                    Button("Reload Saved Values") {
+                        syncFromSettings()
+                    }
                 }
 
                 GroupBox("Workspace & Access") {
@@ -577,6 +774,9 @@ struct SettingsView: View {
     private func syncFromSettings() {
         defaultSubject = appModel.settings.defaultStudentSubject
         defaultHourlyRate = appModel.settings.defaultStudentHourlyRate
+        defaultSessionType = appModel.settings.defaultSessionType
+        defaultSessionLocation = appModel.settings.defaultSessionLocation
+        defaultSessionPaymentMethod = appModel.settings.defaultSessionPaymentMethod
     }
 }
 
@@ -698,5 +898,88 @@ struct EmptyStateView: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
+    }
+}
+
+struct StudentPaymentReportRow: View {
+    let report: StudentPaymentReport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(report.studentName)
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Text("\(report.paidSessionCount) paid • \(report.openSessionCount) open")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 18) {
+                PaymentMiniMetric(title: "Collected", value: AppFormat.currency(report.collectedAmount))
+                PaymentMiniMetric(title: "Awaiting", value: AppFormat.currency(report.unpaidAmount))
+                PaymentMiniMetric(title: "Partial", value: AppFormat.currency(report.partiallyPaidSessionValue))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+    }
+}
+
+struct PaymentSessionRow: View {
+    let session: LessonSession
+    let studentName: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(session.title)
+                    .font(.title3.weight(.semibold))
+                Text("\(studentName) • \(AppFormat.dateTimeFormatter.string(from: session.startAt))")
+                    .foregroundStyle(.secondary)
+                if !session.paymentMethod.isEmpty {
+                    Text("Method: \(session.paymentMethod)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(AppFormat.currency(session.paymentAmount))
+                    .font(.headline)
+                Text(session.paymentStatus.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(paymentStatusColor(session.paymentStatus))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+    }
+
+    private func paymentStatusColor(_ status: PaymentStatus) -> Color {
+        switch status {
+        case .paid:
+            return .green
+        case .partiallyPaid:
+            return .orange
+        case .unpaid:
+            return .red
+        }
+    }
+}
+
+struct PaymentMiniMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
