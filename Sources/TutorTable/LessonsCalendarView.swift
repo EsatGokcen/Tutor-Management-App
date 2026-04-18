@@ -70,125 +70,161 @@ struct LessonsCalendarView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Calendar")
-                            .font(.system(size: 28, weight: .semibold))
-                        Text("A live view of every lesson on your schedule. New and existing sessions appear here automatically.")
-                            .foregroundStyle(.secondary)
-                    }
+        GeometryReader { proxy in
+            let isCompact = proxy.size.width < 1180
 
-                    Spacer()
-
-                    HStack(spacing: 10) {
-                        Button("Today") {
-                            jumpToToday()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .bottom) {
+                            calendarHeaderCopy
+                            Spacer()
+                            calendarHeaderControls
                         }
 
-                        Button {
-                            changeDisplayedMonth(by: -1)
-                        } label: {
-                            Image(systemName: "chevron.left")
-                        }
-
-                        Button {
-                            changeDisplayedMonth(by: 1)
-                        } label: {
-                            Image(systemName: "chevron.right")
+                        VStack(alignment: .leading, spacing: 16) {
+                            calendarHeaderCopy
+                            calendarHeaderControls
                         }
                     }
-                    .buttonStyle(.bordered)
-                }
 
-                HStack {
-                    Text(displayedMonthTitle)
-                        .font(.system(size: 24, weight: .semibold))
-                    Spacer()
-                    Text("\(lessonsThisMonthCount) lesson\(lessonsThisMonthCount == 1 ? "" : "s") in view")
-                        .foregroundStyle(.secondary)
-                }
+                    HStack {
+                        Text(displayedMonthTitle)
+                            .font(.system(size: 24, weight: .semibold))
+                        Spacer()
+                        Text("\(lessonsThisMonthCount) lesson\(lessonsThisMonthCount == 1 ? "" : "s") in view")
+                            .foregroundStyle(AppTheme.mutedText)
+                    }
 
-                LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                    spacing: 18
-                ) {
-                    MetricCard(
-                        title: "Lessons This Month",
-                        value: "\(lessonsThisMonthCount)",
-                        subtitle: displayedMonthTitle
-                    )
-                    MetricCard(
-                        title: "Booked Hours",
-                        value: LessonsCalendarFormatters.hourSummary(bookedHoursThisMonth),
-                        subtitle: "Across all scheduled lessons"
-                    )
-                    MetricCard(
-                        title: "Paid This Month",
-                        value: AppFormat.currency(paidThisMonth),
-                        subtitle: "Collected from paid sessions"
-                    )
-                    MetricCard(
-                        title: "Selected Day",
-                        value: "\(selectedDaySessions.count)",
-                        subtitle: "\(selectedDateTitle) • \(LessonsCalendarFormatters.hourSummary(selectedDayHours))"
-                    )
-                }
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 18)],
+                        spacing: 18
+                    ) {
+                        MetricCard(
+                            title: "Lessons This Month",
+                            value: "\(lessonsThisMonthCount)",
+                            subtitle: displayedMonthTitle
+                        )
+                        MetricCard(
+                            title: "Booked Hours",
+                            value: LessonsCalendarFormatters.hourSummary(bookedHoursThisMonth),
+                            subtitle: "Across all scheduled lessons"
+                        )
+                        MetricCard(
+                            title: "Paid This Month",
+                            value: AppFormat.currency(paidThisMonth),
+                            subtitle: "Collected from paid sessions"
+                        )
+                        MetricCard(
+                            title: "Selected Day",
+                            value: "\(selectedDaySessions.count)",
+                            subtitle: "\(selectedDateTitle) • \(LessonsCalendarFormatters.hourSummary(selectedDayHours))"
+                        )
+                    }
 
-                HStack(alignment: .top, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        LessonsCalendarWeekdayHeader(calendar: calendar)
-
-                        LazyVGrid(
-                            columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7),
-                            spacing: 10
-                        ) {
-                            ForEach(monthDays) { day in
-                                LessonsCalendarDayCell(
-                                    day: day,
-                                    studentNameProvider: appModel.studentName,
-                                    isToday: calendar.isDateInToday(day.date),
-                                    isSelected: calendar.isDate(day.date, inSameDayAs: selectedDate),
-                                    onSelectDay: {
-                                        selectDay(day.date)
-                                    },
-                                    onOpenSession: { session in
-                                        selectDay(day.date)
-                                        selectedSession = session
-                                    }
-                                )
+                    Group {
+                        if isCompact {
+                            VStack(alignment: .leading, spacing: 20) {
+                                calendarBoard
+                                calendarSidebar
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 20) {
+                                calendarBoard
+                                calendarSidebar
+                                    .frame(width: 320)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color(nsColor: .windowBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
-
-                    LessonsCalendarSidebar(
-                        selectedDateTitle: selectedDateTitle,
-                        selectedDaySessions: selectedDaySessions,
-                        studentNameProvider: appModel.studentName,
-                        onOpenSession: { session in
-                            selectedSession = session
-                        }
-                    )
-                    .frame(width: 320)
                 }
+                .padding(.bottom, 20)
             }
-            .padding(.bottom, 20)
         }
         .sheet(item: $selectedSession) { session in
             LessonsCalendarSessionDetailSheet(session: session)
                 .environmentObject(appModel)
         }
+    }
+
+    private var calendarBoard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            LessonsCalendarWeekdayHeader(calendar: calendar)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7),
+                spacing: 10
+            ) {
+                ForEach(monthDays) { day in
+                    LessonsCalendarDayCell(
+                        day: day,
+                        studentNameProvider: appModel.studentName,
+                        isToday: calendar.isDateInToday(day.date),
+                        isSelected: calendar.isDate(day.date, inSameDayAs: selectedDate),
+                        onSelectDay: {
+                            selectDay(day.date)
+                        },
+                        onOpenSession: { session in
+                            selectDay(day.date)
+                            selectedSession = session
+                        }
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(AppTheme.panelBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
+        )
+    }
+
+    private var calendarSidebar: some View {
+        LessonsCalendarSidebar(
+            selectedDateTitle: selectedDateTitle,
+            selectedDaySessions: selectedDaySessions,
+            studentNameProvider: appModel.studentName,
+            onOpenSession: { session in
+                selectedSession = session
+            }
+        )
+    }
+
+    private var calendarHeaderCopy: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Calendar")
+                .font(.system(size: 28, weight: .semibold))
+            Text("A live view of every lesson on your schedule. New and existing sessions appear here automatically.")
+                .foregroundStyle(AppTheme.mutedText)
+        }
+    }
+
+    private var calendarHeaderControls: some View {
+        HStack(spacing: 10) {
+            Button("Today") {
+                jumpToToday()
+            }
+            .appInteractiveButton()
+
+            Button {
+                changeDisplayedMonth(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .appInteractiveButton()
+
+            Button {
+                changeDisplayedMonth(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .appInteractiveButton()
+        }
+        .buttonStyle(.bordered)
     }
 
     private func selectDay(_ date: Date) {
@@ -280,6 +316,7 @@ private struct LessonsCalendarDayCell: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .appInteractiveButton(scaleAmount: 1.01)
                 }
 
                 if day.sessions.count > 3 {
@@ -306,6 +343,7 @@ private struct LessonsCalendarDayCell: View {
         .onTapGesture {
             onSelectDay()
         }
+        .appInteractiveButton(scaleAmount: 1.005)
     }
 
     private var dayNumberColor: Color {
@@ -330,12 +368,12 @@ private struct LessonsCalendarDayCell: View {
 
     private var cellBackground: Color {
         if isSelected {
-            return Color.accentColor.opacity(0.08)
+            return Color.accentColor.opacity(0.10)
         }
         if day.isInDisplayedMonth {
-            return Color(nsColor: .underPageBackgroundColor)
+            return AppTheme.panelBackgroundSoft
         }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.55)
+        return AppTheme.panelBackgroundSoft.opacity(0.58)
     }
 
     private var cellBorder: Color {
@@ -345,7 +383,7 @@ private struct LessonsCalendarDayCell: View {
         if isToday {
             return .accentColor.opacity(0.28)
         }
-        return Color.primary.opacity(0.06)
+        return AppTheme.panelBorder
     }
 }
 
@@ -432,6 +470,7 @@ private struct LessonsCalendarSidebar: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .appInteractiveButton(scaleAmount: 1.01)
                 }
             }
 
@@ -440,11 +479,11 @@ private struct LessonsCalendarSidebar: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(AppTheme.panelBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
         )
     }
 }
@@ -486,11 +525,11 @@ private struct LessonsCalendarSidebarRow: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .underPageBackgroundColor))
+                .fill(AppTheme.panelBackgroundSoft)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
         )
     }
 
@@ -536,6 +575,7 @@ private struct LessonsCalendarSessionDetailSheet: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .appInteractiveButton()
                 }
 
                 GroupBox("Schedule") {
@@ -592,10 +632,12 @@ private struct LessonsCalendarSessionDetailSheet: View {
                     Button("Edit Session") {
                         isShowingEditSheet = true
                     }
+                    .appInteractiveButton()
 
                     Button("Delete Session", role: .destructive) {
                         isShowingDeleteConfirmation = true
                     }
+                    .appInteractiveButton()
 
                     Spacer()
                 }
@@ -649,6 +691,7 @@ private struct LessonsCalendarSessionEditSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .appInteractiveButton()
                 }
 
                 GroupBox("Session Details") {
@@ -730,6 +773,7 @@ private struct LessonsCalendarSessionEditSheet: View {
                         dismiss()
                     }
                     .disabled(!draft.isValid)
+                    .appInteractiveButton()
                 }
             }
             .padding(24)

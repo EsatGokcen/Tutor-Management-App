@@ -1,128 +1,156 @@
 import SwiftUI
 
+enum VoiceCommandPanelMode {
+    case compact
+    case full
+}
+
 struct VoiceInputView: View {
     @EnvironmentObject private var appModel: AppModel
 
     var body: some View {
-        VoiceInputContentView(voiceCommandManager: appModel.voiceCommandManager)
+        VoiceCommandPanelView(
+            voiceCommandManager: appModel.voiceCommandManager,
+            mode: .full
+        )
             .environmentObject(appModel)
     }
 }
 
-private struct VoiceInputContentView: View {
+struct VoiceCommandPanelView: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject var voiceCommandManager: VoiceCommandManager
+    let mode: VoiceCommandPanelMode
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Voice Input")
-                    .font(.system(size: 28, weight: .semibold))
+        GroupBox(mode == .compact ? "Speak To TutorTable" : "Speak A Session Command") {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Press Start Listening, say what changed, then review the transcript before applying it. TutorTable can create new sessions and update payment status for existing ones.")
+                    .foregroundStyle(AppTheme.mutedText)
 
-                GroupBox("Speak A Session Command") {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Text("Press Start Listening, say what changed, then review the transcript before applying it. TutorTable can create new sessions and update payment status for existing ones.")
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 18) {
-                            Button {
-                                if voiceCommandManager.isListening {
-                                    voiceCommandManager.stopListening()
-                                } else {
-                                    voiceCommandManager.startListening()
-                                }
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(voiceCommandManager.isListening ? Color.red.opacity(0.18) : Color.accentColor.opacity(0.16))
-                                        .frame(width: 78, height: 78)
-                                    Image(systemName: voiceCommandManager.isListening ? "stop.fill" : "mic.fill")
-                                        .font(.system(size: 28, weight: .semibold))
-                                        .foregroundStyle(voiceCommandManager.isListening ? Color.red : Color.accentColor)
-                                }
-                            }
-                            .buttonStyle(.plain)
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(voiceCommandManager.isListening ? "Listening Now" : "Ready")
-                                    .font(.title3.weight(.semibold))
-                                Text(voiceCommandManager.statusText)
-                                    .foregroundStyle(.secondary)
-                                Text("Built with Apple's free speech recognition on macOS.")
-                                    .foregroundStyle(.secondary)
-                                    .font(.subheadline)
-                            }
-
-                            Spacer()
+                HStack(spacing: 18) {
+                    Button {
+                        if voiceCommandManager.isListening {
+                            voiceCommandManager.stopListening()
+                        } else {
+                            voiceCommandManager.startListening()
                         }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Transcript")
-                                .font(.headline)
-                            TextEditor(text: $voiceCommandManager.transcript)
-                                .frame(minHeight: 180)
-                                .padding(8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .fill(Color(nsColor: .textBackgroundColor))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                                )
-                        }
-
-                        if let errorMessage = voiceCommandManager.errorMessage {
-                            Text(errorMessage)
-                                .foregroundStyle(.red)
-                        }
-
-                        HStack {
-                            Button(voiceCommandManager.isListening ? "Stop Listening" : "Start Listening") {
-                                if voiceCommandManager.isListening {
-                                    voiceCommandManager.stopListening()
-                                } else {
-                                    voiceCommandManager.startListening()
-                                }
-                            }
-
-                            Button("Apply Command") {
-                                appModel.applyVoiceCommandTranscript()
-                            }
-                            .disabled(voiceCommandManager.isListening || voiceCommandManager.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                            Button("Clear Transcript") {
-                                voiceCommandManager.clearTranscript()
-                            }
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(voiceCommandManager.isListening ? Color.red.opacity(0.22) : AppTheme.accent.opacity(0.20))
+                                .frame(width: mode == .compact ? 70 : 78, height: mode == .compact ? 70 : 78)
+                            Image(systemName: voiceCommandManager.isListening ? "stop.fill" : "mic.fill")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(voiceCommandManager.isListening ? Color.red : AppTheme.accent)
                         }
                     }
-                    .padding(.top, 8)
+                    .buttonStyle(.plain)
+                    .appInteractiveButton(scaleAmount: 1.02)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(voiceCommandManager.isListening ? "Listening Now" : "Ready")
+                            .font(.title3.weight(.semibold))
+                        Text(voiceCommandManager.statusText)
+                            .foregroundStyle(AppTheme.mutedText)
+                        Text("Built with Apple's free speech recognition on macOS.")
+                            .foregroundStyle(AppTheme.mutedText)
+                            .font(.subheadline)
+                    }
+
+                    Spacer()
                 }
 
-                GroupBox("What You Can Say") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VoiceExampleRow(text: "Next week Wednesday I have a session with Reef at 3pm. It will be an hour at standard rate and he hasn't paid yet.")
-                        VoiceExampleRow(text: "Reef just paid for the Wednesday session that happened today.")
-                        VoiceExampleRow(text: "Tomorrow at 6pm I have a session with Maya on Zoom for 90 minutes and she will pay by bank transfer.")
-                    }
-                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Transcript")
+                        .font(.headline)
+                    TextEditor(text: $voiceCommandManager.transcript)
+                        .frame(minHeight: mode == .compact ? 180 : 190)
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(AppTheme.panelBackgroundSoft)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(AppTheme.panelBorder, lineWidth: 1)
+                        )
                 }
 
-                GroupBox("How It Works") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("TutorTable listens for a student name, a date and time, and payment clues like paid, unpaid, cash, or bank transfer.")
-                        Text("New sessions are added straight into your normal session list and calendar. Payment updates change the existing matching session.")
-                        Text("If multiple sessions could match the same spoken update, TutorTable will ask for a more specific command so it does not update the wrong lesson.")
+                if let errorMessage = voiceCommandManager.errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        voiceActionButtons
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        voiceActionButtons
+                    }
+                }
+
+                if mode == .full {
+                    GroupBox("What You Can Say") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            VoiceExampleRow(text: "Next week Wednesday I have a session with Reef at 3pm. It will be an hour at standard rate and he hasn't paid yet.")
+                            VoiceExampleRow(text: "Reef just paid for the Wednesday session that happened today.")
+                            VoiceExampleRow(text: "Tomorrow at 6pm I have a session with Maya on Zoom for 90 minutes and she will pay by bank transfer.")
+                        }
+                        .padding(.top, 8)
+                    }
+
+                    GroupBox("How It Works") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("TutorTable listens for a student name, a date and time, and payment clues like paid, unpaid, cash, or bank transfer.")
+                            Text("New sessions are added straight into your normal session list and calendar. Payment updates change the existing matching session.")
+                            Text("If multiple sessions could match the same spoken update, TutorTable will ask for a more specific command so it does not update the wrong lesson.")
+                        }
+                        .foregroundStyle(AppTheme.mutedText)
+                        .padding(.top, 8)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Try saying")
+                            .font(.headline)
+
+                        VoiceExampleCapsule(text: "“Next week Wednesday I have a session with Reef at 3pm.”")
+                        VoiceExampleCapsule(text: "“Reef just paid for the Wednesday session that happened today.”")
+                    }
                 }
             }
-            .padding(.bottom, 20)
+            .padding(.top, 8)
         }
         .onDisappear {
             voiceCommandManager.stopListening()
         }
+    }
+}
+
+private extension VoiceCommandPanelView {
+    @ViewBuilder
+    var voiceActionButtons: some View {
+        Button(voiceCommandManager.isListening ? "Stop Listening" : "Start Listening") {
+            if voiceCommandManager.isListening {
+                voiceCommandManager.stopListening()
+            } else {
+                voiceCommandManager.startListening()
+            }
+        }
+        .appInteractiveButton()
+
+        Button("Apply Command") {
+            appModel.applyVoiceCommandTranscript()
+        }
+        .disabled(voiceCommandManager.isListening || voiceCommandManager.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .appInteractiveButton()
+
+        Button("Clear Transcript") {
+            voiceCommandManager.clearTranscript()
+        }
+        .appInteractiveButton()
     }
 }
 
@@ -137,5 +165,25 @@ private struct VoiceExampleRow: View {
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+private struct VoiceExampleCapsule: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .foregroundStyle(AppTheme.mutedText)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(AppTheme.panelBackgroundSoft)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(AppTheme.panelBorder, lineWidth: 1)
+            )
     }
 }

@@ -4,6 +4,10 @@
 <dict>
 	<key>files</key>
 	<dict>
+		<key>Resources/TutorTable.icns</key>
+		<data>
+		cmfkMjI3tChqwBTk1Lb6wkxVKSo=
+		</data>
 		<key>Resources/TutorTableLauncher.app/Contents/Info.plist</key>
 		<data>
 		YuswQMoiLVwl+1wo8N9IdEW9ZUQ=
@@ -15,6 +19,13 @@
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>Resources/TutorTable.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			/4gdGvGRSAbSa6ZSyI9+jcXyj/pILkeqlF623MMReuA=
+			</data>
+		</dict>
 		<key>Resources/TutorTableLauncher.app/Contents/Info.plist</key>
 		<dict>
 			<key>hash2</key>

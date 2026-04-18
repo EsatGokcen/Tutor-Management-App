@@ -60,6 +60,10 @@ cp /Library/Developer/CommandLineTools/usr/include/swift/module.modulemap "$TOOL
 cp "$ROOT_DIR/App/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/App/LauncherInfo.plist" "$LAUNCHER_CONTENTS_DIR/Info.plist"
 
+if [[ -f "$ROOT_DIR/App/TutorTable.icns" ]]; then
+  cp "$ROOT_DIR/App/TutorTable.icns" "$RESOURCES_DIR/TutorTable.icns"
+fi
+
 if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
 fi

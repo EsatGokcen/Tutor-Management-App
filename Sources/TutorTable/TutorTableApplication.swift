@@ -13,6 +13,10 @@ final class TutorTableApplication: NSObject, NSApplicationDelegate, NSWindowDele
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
+        if let iconURL = Bundle.main.url(forResource: "TutorTable", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApplication.shared.applicationIconImage = icon
+        }
         configureStatusItem()
         DistributedNotificationCenter.default().addObserver(
             self,
@@ -63,11 +67,11 @@ final class TutorTableApplication: NSObject, NSApplicationDelegate, NSWindowDele
         window.delegate = self
         window.title = "TutorTable"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 1120, height: 760)
+        window.minSize = NSSize(width: 1080, height: 740)
         window.collectionBehavior.insert(.moveToActiveSpace)
 
         if isNewWindow {
-            window.setContentSize(NSSize(width: 1180, height: 780))
+            window.setContentSize(NSSize(width: 1160, height: 780))
             window.center()
             presentWindow()
         }

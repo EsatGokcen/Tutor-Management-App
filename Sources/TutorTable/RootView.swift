@@ -2,57 +2,74 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
+    @State private var selectedSection: AppSection = .overview
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let bannerMessage = appModel.bannerMessage {
-                BannerView(message: bannerMessage) {
-                    appModel.dismissBanner()
+        GeometryReader { proxy in
+            let isCompactShell = proxy.size.width < 1240
+            let sidebarWidth: CGFloat = isCompactShell ? 236 : 280
+            let outerPadding: CGFloat = isCompactShell ? 12 : 18
+            let contentPadding: CGFloat = isCompactShell ? 18 : 28
+
+            ZStack {
+                AppTheme.appBackground.ignoresSafeArea()
+
+                LinearGradient(
+                    colors: [AppTheme.accent.opacity(0.14), .clear, AppTheme.accentSecondary.opacity(0.10)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                HStack(spacing: 0) {
+                    AppSidebar(selectedSection: $selectedSection)
+                        .frame(width: sidebarWidth)
+
+                    VStack(spacing: 0) {
+                        if let bannerMessage = appModel.bannerMessage {
+                            BannerView(message: bannerMessage) {
+                                appModel.dismissBanner()
+                            }
+                        }
+
+                        Group {
+                            switch selectedSection {
+                            case .overview:
+                                OverviewView()
+                            case .calendar:
+                                LessonsCalendarView()
+                            case .payments:
+                                PaymentsView()
+                            case .students:
+                                StudentsView()
+                            case .sessions:
+                                SessionsView()
+                            case .settings:
+                                SettingsView()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(contentPadding)
+                        .background(
+                            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                                .fill(AppTheme.contentBackground.opacity(0.96))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                        )
+                        .padding(outerPadding)
+                    }
                 }
             }
-
-            TabView {
-                OverviewView()
-                    .tabItem {
-                        Label("Overview", systemImage: "house")
-                    }
-
-                StudentsView()
-                    .tabItem {
-                        Label("Students", systemImage: "person.3")
-                    }
-
-                SessionsView()
-                    .tabItem {
-                        Label("Sessions", systemImage: "calendar")
-                    }
-
-                LessonsCalendarView()
-                    .tabItem {
-                        Label("Calendar", systemImage: "calendar.day.timeline.left")
-                    }
-
-                VoiceInputView()
-                    .tabItem {
-                        Label("Voice", systemImage: "waveform.and.mic")
-                    }
-
-                PaymentsView()
-                    .tabItem {
-                        Label("Payments", systemImage: "sterlingsign.circle")
-                    }
-
-                SettingsView()
-                    .tabItem {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-            }
-            .padding(24)
         }
         .font(.system(size: 15.5))
         .controlSize(.large)
-        .background(Color(nsColor: .underPageBackgroundColor))
-        .frame(minWidth: 1160, minHeight: 800)
+        .tint(AppTheme.accent)
+        .foregroundStyle(.white)
+        .groupBoxStyle(TutorTablePanelGroupBoxStyle())
+        .preferredColorScheme(.dark)
+        .frame(minWidth: 1080, minHeight: 760)
     }
 }
 
@@ -61,81 +78,108 @@ struct OverviewView: View {
     @State private var incomeTimeframe: IncomeTimeframe = .monthly
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Overview")
-                    .font(.system(size: 28, weight: .semibold))
+        GeometryReader { proxy in
+            let isCompact = proxy.size.width < 1120
 
-                if !appModel.hasAnyRecords {
-                    GroupBox("Getting Started") {
-                        Text("TutorTable is ready. Add your first student or visit Settings to load sample data and adjust your default lesson subject and rate.")
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 8)
-                    }
-                }
-
-                LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                    spacing: 18
-                ) {
-                    MetricCard(title: "Students", value: "\(appModel.students.count)", subtitle: "Tracked locally")
-                    MetricCard(title: "Upcoming", value: "\(appModel.upcomingSessions.count)", subtitle: "Scheduled lessons")
-                    MetricCard(title: "Outstanding", value: AppFormat.currency(appModel.outstandingBalance), subtitle: "Awaiting payment")
-                    IncomeMetricCard(
-                        timeframe: $incomeTimeframe,
-                        total: appModel.incomeEarned(in: incomeTimeframe),
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    OverviewHeroView(
+                        upcomingCount: appModel.upcomingSessions.count,
+                        studentCount: appModel.students.count,
+                        outstandingBalance: appModel.outstandingBalance,
+                        incomeTimeframe: $incomeTimeframe,
+                        incomeTotal: appModel.incomeEarned(in: incomeTimeframe),
                         paidSessions: appModel.paidSessionCount(in: incomeTimeframe)
                     )
-                }
 
-                GroupBox("Upcoming Sessions") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if appModel.upcomingSessions.isEmpty {
-                            EmptyStateView(message: "Your upcoming sessions will show up here once you add them.")
-                        } else {
-                            ForEach(Array(appModel.upcomingSessions.prefix(6))) { session in
-                                SessionSummaryRow(
-                                    title: session.title,
-                                    subtitle: "\(appModel.studentName(for: session.studentID)) • \(AppFormat.dateTimeFormatter.string(from: session.startAt))",
-                                    trailing: session.paymentStatus.title
-                                )
-                            }
+                    if !appModel.hasAnyRecords {
+                        GroupBox("Getting Started") {
+                            Text("TutorTable is ready. Add your first student or visit Settings to load sample data and adjust your default lesson subject and rate.")
+                                .foregroundStyle(AppTheme.mutedText)
+                                .padding(.top, 8)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                }
 
-                GroupBox("Recent Lesson Memory") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if appModel.recentLessons.isEmpty {
-                            EmptyStateView(message: "Past lessons with notes or homework will appear here.")
-                        } else {
-                            ForEach(Array(appModel.recentLessons.prefix(8))) { session in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("\(appModel.studentName(for: session.studentID)) • \(AppFormat.shortDateFormatter.string(from: session.startAt))")
-                                        .font(.title3.weight(.semibold))
-                                    if !session.lessonNotes.isEmpty {
-                                        Text(session.lessonNotes)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(3)
-                                    }
-                                    if !session.homework.isEmpty {
-                                        Text("Homework: \(session.homework)")
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 6)
+                    if isCompact {
+                        VStack(alignment: .leading, spacing: 22) {
+                            overviewVoiceSection
+                            recentLessonMemorySection
+                            upcomingSessionsSection
+                        }
+                    } else {
+                        HStack(alignment: .top, spacing: 22) {
+                            VStack(alignment: .leading, spacing: 22) {
+                                overviewVoiceSection
+                                upcomingSessionsSection
                             }
+                            .frame(maxWidth: .infinity, alignment: .top)
+
+                            recentLessonMemorySection
+                                .frame(width: 350, alignment: .top)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
+                }
+                .padding(.bottom, 20)
+            }
+        }
+    }
+
+    private var overviewVoiceSection: some View {
+        VoiceCommandPanelView(
+            voiceCommandManager: appModel.voiceCommandManager,
+            mode: .compact
+        )
+        .environmentObject(appModel)
+    }
+
+    private var upcomingSessionsSection: some View {
+        GroupBox("Upcoming Sessions") {
+            VStack(alignment: .leading, spacing: 14) {
+                if appModel.upcomingSessions.isEmpty {
+                    EmptyStateView(message: "Your upcoming sessions will show up here once you add them.")
+                } else {
+                    ForEach(Array(appModel.upcomingSessions.prefix(6))) { session in
+                        SessionSummaryRow(
+                            title: session.title,
+                            subtitle: "\(appModel.studentName(for: session.studentID)) • \(AppFormat.dateTimeFormatter.string(from: session.startAt))",
+                            trailing: session.paymentStatus.title
+                        )
+                    }
                 }
             }
-            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+        }
+    }
+
+    private var recentLessonMemorySection: some View {
+        GroupBox("Recent Lesson Memory") {
+            VStack(alignment: .leading, spacing: 14) {
+                if appModel.recentLessons.isEmpty {
+                    EmptyStateView(message: "Past lessons with notes or homework will appear here.")
+                } else {
+                    ForEach(Array(appModel.recentLessons.prefix(8))) { session in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("\(appModel.studentName(for: session.studentID)) • \(AppFormat.shortDateFormatter.string(from: session.startAt))")
+                                .font(.title3.weight(.semibold))
+                            if !session.lessonNotes.isEmpty {
+                                Text(session.lessonNotes)
+                                    .foregroundStyle(AppTheme.mutedText)
+                                    .lineLimit(3)
+                            }
+                            if !session.homework.isEmpty {
+                                Text("Homework: \(session.homework)")
+                                    .foregroundStyle(AppTheme.mutedText)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
         }
     }
 }
@@ -157,6 +201,7 @@ struct StudentsView: View {
                         selectedStudentID = nil
                         draft = appModel.newStudentDraft()
                     }
+                    .appInteractiveButton()
                 }
 
                 List(selection: $selectedStudentID) {
@@ -176,6 +221,16 @@ struct StudentsView: View {
                         .tag(student.id)
                     }
                 }
+                .scrollContentBackground(.hidden)
+                .listStyle(.inset(alternatesRowBackgrounds: false))
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(AppTheme.panelBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(AppTheme.panelBorder, lineWidth: 1)
+                )
             }
             .frame(width: 320)
 
@@ -208,30 +263,14 @@ struct StudentsView: View {
                                     .frame(minHeight: 170)
                             }
 
-                            HStack {
-                                Button("Save Student") {
-                                    if let savedStudent = appModel.saveStudent(draft) {
-                                        selectedStudentID = savedStudent.id
-                                        draft = StudentDraft(student: savedStudent)
-                                    }
-                                }
-                                .disabled(!draft.isValid)
-
-                                Button("Use Saved Defaults") {
-                                    let previousName = draft.fullName
-                                    draft = appModel.newStudentDraft()
-                                    draft.fullName = previousName
+                            ViewThatFits(in: .horizontal) {
+                                HStack {
+                                    studentEditorButtons
                                 }
 
-                                Button("Delete Student") {
-                                    guard let selectedStudentID else {
-                                        return
-                                    }
-                                    appModel.deleteStudent(id: selectedStudentID)
-                                    self.selectedStudentID = nil
-                                    draft = appModel.newStudentDraft()
+                                VStack(alignment: .leading, spacing: 10) {
+                                    studentEditorButtons
                                 }
-                                .disabled(selectedStudentID == nil)
                             }
                         }
                         .padding(.top, 8)
@@ -319,6 +358,7 @@ struct SessionsView: View {
                         draft = appModel.newSessionDraft()
                     }
                     .disabled(appModel.students.isEmpty)
+                    .appInteractiveButton()
                 }
 
                 Picker("Filter", selection: $filter) {
@@ -346,6 +386,16 @@ struct SessionsView: View {
                             .tag(session.id)
                         }
                     }
+                    .scrollContentBackground(.hidden)
+                    .listStyle(.inset(alternatesRowBackgrounds: false))
+                    .background(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(AppTheme.panelBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(AppTheme.panelBorder, lineWidth: 1)
+                    )
                 }
             }
             .frame(width: 370)
@@ -419,34 +469,14 @@ struct SessionsView: View {
                         .padding(.top, 8)
                     }
 
-                    HStack {
-                        Button("Save Session") {
-                            if let savedSession = appModel.saveSession(draft) {
-                                selectedSessionID = savedSession.id
-                                draft = SessionDraft(session: savedSession)
-                            }
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            sessionEditorButtons
                         }
-                        .disabled(appModel.students.isEmpty || !draft.isValid)
 
-                        Button("Use Saved Defaults") {
-                            applySavedSessionDefaults()
+                        VStack(alignment: .leading, spacing: 10) {
+                            sessionEditorButtons
                         }
-                        .disabled(appModel.students.isEmpty)
-
-                        Button("Copy Session") {
-                            copySelectedSession()
-                        }
-                        .disabled(selectedSessionID == nil)
-
-                        Button("Delete Session") {
-                            guard let selectedSessionID else {
-                                return
-                            }
-                            appModel.deleteSession(id: selectedSessionID)
-                            self.selectedSessionID = nil
-                            draft = appModel.newSessionDraft()
-                        }
-                        .disabled(selectedSessionID == nil)
                     }
                 }
             }
@@ -531,6 +561,73 @@ struct SessionsView: View {
         self.selectedSessionID = nil
         draft = copiedDraft
     }
+
+    @ViewBuilder
+    private var sessionEditorButtons: some View {
+        Button("Save Session") {
+            if let savedSession = appModel.saveSession(draft) {
+                selectedSessionID = savedSession.id
+                draft = SessionDraft(session: savedSession)
+            }
+        }
+        .disabled(appModel.students.isEmpty || !draft.isValid)
+        .appInteractiveButton()
+
+        Button("Use Saved Defaults") {
+            applySavedSessionDefaults()
+        }
+        .disabled(appModel.students.isEmpty)
+        .appInteractiveButton()
+
+        Button("Copy Session") {
+            copySelectedSession()
+        }
+        .disabled(selectedSessionID == nil)
+        .appInteractiveButton()
+
+        Button("Delete Session") {
+            guard let selectedSessionID else {
+                return
+            }
+            appModel.deleteSession(id: selectedSessionID)
+            self.selectedSessionID = nil
+            draft = appModel.newSessionDraft()
+        }
+        .disabled(selectedSessionID == nil)
+        .appInteractiveButton()
+    }
+}
+
+private extension StudentsView {
+    @ViewBuilder
+    var studentEditorButtons: some View {
+        Button("Save Student") {
+            if let savedStudent = appModel.saveStudent(draft) {
+                selectedStudentID = savedStudent.id
+                draft = StudentDraft(student: savedStudent)
+            }
+        }
+        .disabled(!draft.isValid)
+        .appInteractiveButton()
+
+        Button("Use Saved Defaults") {
+            let previousName = draft.fullName
+            draft = appModel.newStudentDraft()
+            draft.fullName = previousName
+        }
+        .appInteractiveButton()
+
+        Button("Delete Student") {
+            guard let selectedStudentID else {
+                return
+            }
+            appModel.deleteStudent(id: selectedStudentID)
+            self.selectedStudentID = nil
+            draft = appModel.newStudentDraft()
+        }
+        .disabled(selectedStudentID == nil)
+        .appInteractiveButton()
+    }
 }
 
 struct PaymentsView: View {
@@ -553,279 +650,147 @@ struct PaymentsView: View {
         let impliedDiscount = creditDraft.impliedDiscount(for: selectedStudent)
         let effectiveHourlyRate = creditDraft.purchasedHours > 0 ? (creditDraft.amountPaid / creditDraft.purchasedHours) : 0
 
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Payments")
-                    .font(.system(size: 28, weight: .semibold))
+        return GeometryReader { proxy in
+            let isCompact = proxy.size.width < 1180
 
-                Picker("Reporting timeframe", selection: $timeframe) {
-                    ForEach(IncomeTimeframe.allCases) { item in
-                        Text(item.title).tag(item)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("Payments")
+                        .font(.system(size: 28, weight: .semibold))
+
+                    Picker("Reporting timeframe", selection: $timeframe) {
+                        ForEach(IncomeTimeframe.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
+                    .pickerStyle(.segmented)
 
-                LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                    spacing: 18
-                ) {
-                    MetricCard(
-                        title: "Total Earned",
-                        value: AppFormat.currency(summary.totalEarnedAmount),
-                        subtitle: "\(summary.paidSessionCount + summary.creditCoveredSessionCount) earned session\(summary.paidSessionCount + summary.creditCoveredSessionCount == 1 ? "" : "s")"
-                    )
-                    MetricCard(
-                        title: "Directly Paid",
-                        value: AppFormat.currency(summary.collectedAmount),
-                        subtitle: "\(summary.paidSessionCount) paid session\(summary.paidSessionCount == 1 ? "" : "s")"
-                    )
-                    MetricCard(
-                        title: "Credit Received",
-                        value: AppFormat.currency(summary.creditReceivedAmount),
-                        subtitle: "\(summary.creditPurchaseCount) advance payment\(summary.creditPurchaseCount == 1 ? "" : "s")"
-                    )
-                    MetricCard(
-                        title: "Credit Covered",
-                        value: AppFormat.currency(summary.creditCoveredAmount),
-                        subtitle: "\(summary.creditCoveredSessionCount) session\(summary.creditCoveredSessionCount == 1 ? "" : "s") covered"
-                    )
-                    MetricCard(
-                        title: "Awaiting",
-                        value: AppFormat.currency(summary.unpaidAmount),
-                        subtitle: "\(summary.unpaidSessionCount) unpaid session\(summary.unpaidSessionCount == 1 ? "" : "s")"
-                    )
-                    MetricCard(
-                        title: "Active Credit",
-                        value: AppFormat.hours(activeCreditHours),
-                        subtitle: studentsWithCredit == 0 ? "No student has remaining credit" : "\(studentsWithCredit) student balance\(studentsWithCredit == 1 ? "" : "s") still active"
-                    )
-                }
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 230, maximum: 340), spacing: 18)],
+                        spacing: 18
+                    ) {
+                        MetricCard(
+                            title: "Total Earned",
+                            value: AppFormat.currency(summary.totalEarnedAmount),
+                            subtitle: "\(summary.paidSessionCount + summary.creditCoveredSessionCount) earned session\(summary.paidSessionCount + summary.creditCoveredSessionCount == 1 ? "" : "s")"
+                        )
+                        MetricCard(
+                            title: "Directly Paid",
+                            value: AppFormat.currency(summary.collectedAmount),
+                            subtitle: "\(summary.paidSessionCount) paid session\(summary.paidSessionCount == 1 ? "" : "s")"
+                        )
+                        MetricCard(
+                            title: "Credit Received",
+                            value: AppFormat.currency(summary.creditReceivedAmount),
+                            subtitle: "\(summary.creditPurchaseCount) advance payment\(summary.creditPurchaseCount == 1 ? "" : "s")"
+                        )
+                        MetricCard(
+                            title: "Credit Covered",
+                            value: AppFormat.currency(summary.creditCoveredAmount),
+                            subtitle: "\(summary.creditCoveredSessionCount) session\(summary.creditCoveredSessionCount == 1 ? "" : "s") covered"
+                        )
+                        MetricCard(
+                            title: "Awaiting",
+                            value: AppFormat.currency(summary.unpaidAmount),
+                            subtitle: "\(summary.unpaidSessionCount) unpaid session\(summary.unpaidSessionCount == 1 ? "" : "s")"
+                        )
+                        MetricCard(
+                            title: "Active Credit",
+                            value: AppFormat.hours(activeCreditHours),
+                            subtitle: studentsWithCredit == 0 ? "No student has remaining credit" : "\(studentsWithCredit) student balance\(studentsWithCredit == 1 ? "" : "s") still active"
+                        )
+                    }
 
-                HStack(alignment: .top, spacing: 18) {
-                    GroupBox("Add Or Edit Advance Credit") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if appModel.students.isEmpty {
-                                EmptyStateView(message: "Create a student before logging advance credit.")
-                            } else {
-                                Text("Log prepaid hours here. TutorTable will automatically mark eligible sessions as covered, show which lessons are already paid for, and tell you when the student's credit runs out.")
-                                    .foregroundStyle(.secondary)
-
-                                HStack(alignment: .top, spacing: 18) {
-                                    VStack(alignment: .leading, spacing: 14) {
-                                        Picker("Student", selection: Binding(
-                                            get: { creditDraft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
-                                            set: { creditDraft.studentID = $0 }
-                                        )) {
-                                            ForEach(appModel.studentsSorted) { student in
-                                                Text(student.fullName).tag(student.id)
-                                            }
-                                        }
-
-                                        DatePicker("Payment date", selection: $creditDraft.purchasedAt)
-
-                                        HStack(spacing: 14) {
-                                            PaymentFieldCard(title: "Hours Bought") {
-                                                TextField(
-                                                    "0.00",
-                                                    value: $creditDraft.purchasedHours,
-                                                    format: .number.precision(.fractionLength(2))
-                                                )
-                                                .textFieldStyle(.roundedBorder)
-                                            }
-
-                                            PaymentFieldCard(title: "Amount Paid") {
-                                                TextField(
-                                                    "0.00",
-                                                    value: $creditDraft.amountPaid,
-                                                    format: .number.precision(.fractionLength(2))
-                                                )
-                                                .textFieldStyle(.roundedBorder)
-                                            }
-                                        }
-
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("Payment note")
-                                                .font(.headline)
-                                            TextEditor(text: $creditDraft.note)
-                                                .frame(minHeight: 112)
-                                                .padding(8)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                        .fill(Color(nsColor: .windowBackgroundColor))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                                                )
-                                        }
-
-                                        LazyVGrid(
-                                            columns: [GridItem(.flexible()), GridItem(.flexible())],
-                                            spacing: 10
-                                        ) {
-                                            paymentActionButton("Set Standard Price") {
-                                                creditDraft.amountPaid = standardValue
-                                            }
-                                            .disabled(creditDraft.studentID == nil || creditDraft.purchasedHours <= 0)
-
-                                            paymentActionButton("New Credit Entry") {
-                                                selectedCreditPurchaseID = nil
-                                                creditDraft = appModel.newCreditPurchaseDraft()
-                                            }
-                                            .disabled(appModel.students.isEmpty)
-
-                                            paymentActionButton("Delete Credit Entry") {
-                                                guard let selectedCreditPurchaseID else {
-                                                    return
-                                                }
-                                                appModel.deleteCreditPurchase(id: selectedCreditPurchaseID)
-                                                self.selectedCreditPurchaseID = nil
-                                                creditDraft = appModel.newCreditPurchaseDraft()
-                                            }
-                                            .disabled(selectedCreditPurchaseID == nil)
-
-                                            paymentActionButton("Save Credit Entry") {
-                                                if let savedPurchase = appModel.saveCreditPurchase(creditDraft) {
-                                                    selectedCreditPurchaseID = savedPurchase.id
-                                                    creditDraft = CreditPurchaseDraft(purchase: savedPurchase)
-                                                }
-                                            }
-                                            .disabled(appModel.students.isEmpty || !creditDraft.isValid)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                    VStack(alignment: .leading, spacing: 14) {
-                                        Text("Payment Snapshot")
-                                            .font(.headline)
-
-                                        PaymentInfoRow(
-                                            label: "Standard value",
-                                            value: AppFormat.currency(standardValue)
-                                        )
-                                        PaymentInfoRow(
-                                            label: "Implied discount",
-                                            value: AppFormat.currency(impliedDiscount)
-                                        )
-                                        PaymentInfoRow(
-                                            label: "Effective hourly",
-                                            value: creditDraft.purchasedHours > 0 ? AppFormat.currency(effectiveHourlyRate) : "Not set"
-                                        )
-                                        PaymentInfoRow(
-                                            label: "Selected student rate",
-                                            value: selectedStudent.map { AppFormat.currency($0.hourlyRate) } ?? "Not set"
-                                        )
-
-                                        Text("Set the number of hours and the total amount collected. Any difference from the standard value is treated as the discount automatically.")
-                                            .foregroundStyle(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .frame(width: 260, alignment: .leading)
-                                    .padding(18)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                            .fill(Color(nsColor: .windowBackgroundColor))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                                    )
-                                }
+                    Group {
+                        if isCompact {
+                            VStack(alignment: .leading, spacing: 18) {
+                                creditEditorCard(
+                                    selectedStudent: selectedStudent,
+                                    standardValue: standardValue,
+                                    impliedDiscount: impliedDiscount,
+                                    effectiveHourlyRate: effectiveHourlyRate,
+                                    stackInternals: true
+                                )
+                                creditActivityCard(creditPurchases: creditPurchases)
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 18) {
+                                creditEditorCard(
+                                    selectedStudent: selectedStudent,
+                                    standardValue: standardValue,
+                                    impliedDiscount: impliedDiscount,
+                                    effectiveHourlyRate: effectiveHourlyRate,
+                                    stackInternals: false
+                                )
+                                creditActivityCard(creditPurchases: creditPurchases)
                             }
                         }
-                        .padding(.top, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .top)
 
-                    GroupBox("Credit Purchase Activity") {
+                    GroupBox("Student Credit Balances") {
                         VStack(alignment: .leading, spacing: 14) {
-                            if creditPurchases.isEmpty {
-                                EmptyStateView(message: "Advance payments in the selected timeframe will appear here.")
+                            if creditStatuses.isEmpty {
+                                EmptyStateView(message: "Student credit balances will appear here after you log an advance payment.")
                             } else {
-                                ForEach(creditPurchases) { purchase in
-                                    Button {
-                                        selectedCreditPurchaseID = purchase.id
-                                        creditDraft = CreditPurchaseDraft(purchase: purchase)
-                                    } label: {
-                                        CreditPurchaseRow(
-                                            purchase: purchase,
-                                            studentName: appModel.studentName(for: purchase.studentID),
-                                            isSelected: purchase.id == selectedCreditPurchaseID
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
+                                ForEach(creditStatuses) { status in
+                                    StudentCreditStatusRow(status: status)
                                 }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .top)
-                }
 
-                GroupBox("Student Credit Balances") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if creditStatuses.isEmpty {
-                            EmptyStateView(message: "Student credit balances will appear here after you log an advance payment.")
-                        } else {
-                            ForEach(creditStatuses) { status in
-                                StudentCreditStatusRow(status: status)
+                    GroupBox("Student Payment Report") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if reports.isEmpty {
+                                EmptyStateView(message: "Payment reporting will populate here once your sessions fall into the selected timeframe.")
+                            } else {
+                                ForEach(reports) { report in
+                                    StudentPaymentReportRow(report: report)
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                }
 
-                GroupBox("Student Payment Report") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if reports.isEmpty {
-                            EmptyStateView(message: "Payment reporting will populate here once your sessions fall into the selected timeframe.")
-                        } else {
-                            ForEach(reports) { report in
-                                StudentPaymentReportRow(report: report)
+                    GroupBox("Sessions Requiring Attention") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if openSessions.isEmpty {
+                                EmptyStateView(message: "No unpaid sessions in the selected timeframe.")
+                            } else {
+                                ForEach(openSessions) { session in
+                                    PaymentSessionRow(
+                                        session: session,
+                                        studentName: appModel.studentName(for: session.studentID)
+                                    )
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                }
 
-                GroupBox("Sessions Requiring Attention") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if openSessions.isEmpty {
-                            EmptyStateView(message: "No unpaid sessions in the selected timeframe.")
-                        } else {
-                            ForEach(openSessions) { session in
-                                PaymentSessionRow(
-                                    session: session,
-                                    studentName: appModel.studentName(for: session.studentID)
-                                )
+                    GroupBox("Session Payment Activity") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if paymentSessions.isEmpty {
+                                EmptyStateView(message: "No payment activity for the selected timeframe yet.")
+                            } else {
+                                ForEach(Array(paymentSessions.prefix(12))) { session in
+                                    PaymentSessionRow(
+                                        session: session,
+                                        studentName: appModel.studentName(for: session.studentID)
+                                    )
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
                 }
-
-                GroupBox("Session Payment Activity") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if paymentSessions.isEmpty {
-                            EmptyStateView(message: "No payment activity for the selected timeframe yet.")
-                        } else {
-                            ForEach(Array(paymentSessions.prefix(12))) { session in
-                                PaymentSessionRow(
-                                    session: session,
-                                    studentName: appModel.studentName(for: session.studentID)
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                }
+                .padding(.bottom, 20)
             }
-            .padding(.bottom, 20)
         }
         .onAppear {
             if appModel.students.isEmpty {
@@ -856,6 +821,210 @@ struct PaymentsView: View {
 
             creditDraft = CreditPurchaseDraft(purchase: purchase)
         }
+    }
+
+    @ViewBuilder
+    private func creditEditorCard(
+        selectedStudent: Student?,
+        standardValue: Double,
+        impliedDiscount: Double,
+        effectiveHourlyRate: Double,
+        stackInternals: Bool
+    ) -> some View {
+        GroupBox("Add Or Edit Advance Credit") {
+            VStack(alignment: .leading, spacing: 14) {
+                if appModel.students.isEmpty {
+                    EmptyStateView(message: "Create a student before logging advance credit.")
+                } else {
+                    Text("Log prepaid hours here. TutorTable will automatically mark eligible sessions as covered, show which lessons are already paid for, and tell you when the student's credit runs out.")
+                        .foregroundStyle(AppTheme.mutedText)
+
+                    Group {
+                        if stackInternals {
+                            VStack(alignment: .leading, spacing: 18) {
+                                creditEditorFields(standardValue: standardValue)
+                                creditSnapshotCard(
+                                    selectedStudent: selectedStudent,
+                                    standardValue: standardValue,
+                                    impliedDiscount: impliedDiscount,
+                                    effectiveHourlyRate: effectiveHourlyRate
+                                )
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 18) {
+                                creditEditorFields(standardValue: standardValue)
+                                creditSnapshotCard(
+                                    selectedStudent: selectedStudent,
+                                    standardValue: standardValue,
+                                    impliedDiscount: impliedDiscount,
+                                    effectiveHourlyRate: effectiveHourlyRate
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private func creditEditorFields(standardValue: Double) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Student", selection: Binding(
+                get: { creditDraft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
+                set: { creditDraft.studentID = $0 }
+            )) {
+                ForEach(appModel.studentsSorted) { student in
+                    Text(student.fullName).tag(student.id)
+                }
+            }
+
+            DatePicker("Payment date", selection: $creditDraft.purchasedAt)
+
+            HStack(spacing: 14) {
+                PaymentFieldCard(title: "Hours Bought") {
+                    TextField(
+                        "0.00",
+                        value: $creditDraft.purchasedHours,
+                        format: .number.precision(.fractionLength(2))
+                    )
+                    .textFieldStyle(.roundedBorder)
+                }
+
+                PaymentFieldCard(title: "Amount Paid") {
+                    TextField(
+                        "0.00",
+                        value: $creditDraft.amountPaid,
+                        format: .number.precision(.fractionLength(2))
+                    )
+                    .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Payment note")
+                    .font(.headline)
+                TextEditor(text: $creditDraft.note)
+                    .frame(minHeight: 112)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(AppTheme.panelBackgroundSoft)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(AppTheme.panelBorder, lineWidth: 1)
+                    )
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                spacing: 10
+            ) {
+                paymentActionButton("Set Standard Price") {
+                    creditDraft.amountPaid = standardValue
+                }
+                .disabled(creditDraft.studentID == nil || creditDraft.purchasedHours <= 0)
+
+                paymentActionButton("New Credit Entry") {
+                    selectedCreditPurchaseID = nil
+                    creditDraft = appModel.newCreditPurchaseDraft()
+                }
+                .disabled(appModel.students.isEmpty)
+
+                paymentActionButton("Delete Credit Entry") {
+                    guard let selectedCreditPurchaseID else {
+                        return
+                    }
+                    appModel.deleteCreditPurchase(id: selectedCreditPurchaseID)
+                    self.selectedCreditPurchaseID = nil
+                    creditDraft = appModel.newCreditPurchaseDraft()
+                }
+                .disabled(selectedCreditPurchaseID == nil)
+
+                paymentActionButton("Save Credit Entry") {
+                    if let savedPurchase = appModel.saveCreditPurchase(creditDraft) {
+                        selectedCreditPurchaseID = savedPurchase.id
+                        creditDraft = CreditPurchaseDraft(purchase: savedPurchase)
+                    }
+                }
+                .disabled(appModel.students.isEmpty || !creditDraft.isValid)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func creditSnapshotCard(
+        selectedStudent: Student?,
+        standardValue: Double,
+        impliedDiscount: Double,
+        effectiveHourlyRate: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Payment Snapshot")
+                .font(.headline)
+
+            PaymentInfoRow(
+                label: "Standard value",
+                value: AppFormat.currency(standardValue)
+            )
+            PaymentInfoRow(
+                label: "Implied discount",
+                value: AppFormat.currency(impliedDiscount)
+            )
+            PaymentInfoRow(
+                label: "Effective hourly",
+                value: creditDraft.purchasedHours > 0 ? AppFormat.currency(effectiveHourlyRate) : "Not set"
+            )
+            PaymentInfoRow(
+                label: "Selected student rate",
+                value: selectedStudent.map { AppFormat.currency($0.hourlyRate) } ?? "Not set"
+            )
+
+            Text("Set the number of hours and the total amount collected. Any difference from the standard value is treated as the discount automatically.")
+                .foregroundStyle(AppTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 280, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(AppTheme.panelBackgroundSoft)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func creditActivityCard(creditPurchases: [StudentCreditPurchase]) -> some View {
+        GroupBox("Credit Purchase Activity") {
+            VStack(alignment: .leading, spacing: 14) {
+                if creditPurchases.isEmpty {
+                    EmptyStateView(message: "Advance payments in the selected timeframe will appear here.")
+                } else {
+                    ForEach(creditPurchases) { purchase in
+                        Button {
+                            selectedCreditPurchaseID = purchase.id
+                            creditDraft = CreditPurchaseDraft(purchase: purchase)
+                        } label: {
+                            CreditPurchaseRow(
+                                purchase: purchase,
+                                studentName: appModel.studentName(for: purchase.studentID),
+                                isSelected: purchase.id == selectedCreditPurchaseID
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .appInteractiveButton()
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 }
 
@@ -908,18 +1077,13 @@ struct SettingsView: View {
                     .padding(.top, 8)
                 }
 
-                HStack {
-                    Button("Save All Defaults") {
-                        appModel.saveSettings(
-                            defaultSubject: defaultSubject,
-                            defaultHourlyRate: defaultHourlyRate,
-                            defaultSessionType: defaultSessionType,
-                            defaultSessionLocation: defaultSessionLocation,
-                            defaultSessionPaymentMethod: defaultSessionPaymentMethod
-                        )
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        settingsPrimaryButtons
                     }
-                    Button("Reload Saved Values") {
-                        syncFromSettings()
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        settingsPrimaryButtons
                     }
                 }
 
@@ -933,19 +1097,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
 
-                        HStack {
-                            Button("Open Data Folder") {
-                                appModel.openDataFolder()
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                settingsUtilityButtons
                             }
 
-                            Button("Refresh Hotkey Status") {
-                                appModel.refreshHotKeyStatus()
+                            VStack(alignment: .leading, spacing: 10) {
+                                settingsUtilityButtons
                             }
-
-                            Button("Add Sample Data") {
-                                appModel.addSampleData()
-                            }
-                            .disabled(appModel.hasAnyRecords)
                         }
                     }
                     .padding(.top, 8)
@@ -968,6 +1127,179 @@ struct SettingsView: View {
         defaultSessionLocation = appModel.settings.defaultSessionLocation
         defaultSessionPaymentMethod = appModel.settings.defaultSessionPaymentMethod
     }
+
+    @ViewBuilder
+    private var settingsPrimaryButtons: some View {
+        Button("Save All Defaults") {
+            appModel.saveSettings(
+                defaultSubject: defaultSubject,
+                defaultHourlyRate: defaultHourlyRate,
+                defaultSessionType: defaultSessionType,
+                defaultSessionLocation: defaultSessionLocation,
+                defaultSessionPaymentMethod: defaultSessionPaymentMethod
+            )
+        }
+        .appInteractiveButton()
+
+        Button("Reload Saved Values") {
+            syncFromSettings()
+        }
+        .appInteractiveButton()
+    }
+
+    @ViewBuilder
+    private var settingsUtilityButtons: some View {
+        Button("Open Data Folder") {
+            appModel.openDataFolder()
+        }
+        .appInteractiveButton()
+
+        Button("Refresh Hotkey Status") {
+            appModel.refreshHotKeyStatus()
+        }
+        .appInteractiveButton()
+
+        Button("Add Sample Data") {
+            appModel.addSampleData()
+        }
+        .disabled(appModel.hasAnyRecords)
+        .appInteractiveButton()
+    }
+}
+
+struct OverviewHeroView: View {
+    let upcomingCount: Int
+    let studentCount: Int
+    let outstandingBalance: Double
+    @Binding var incomeTimeframe: IncomeTimeframe
+    let incomeTotal: Double
+    let paidSessions: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Overview")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("A clearer command center for your tutoring week, built around the pages you actually use most.")
+                    .font(.system(size: 16.5))
+                    .foregroundStyle(AppTheme.mutedText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 18)],
+                spacing: 18
+            ) {
+                MiniHeroMetric(title: "Students", value: "\(studentCount)", subtitle: "Active records")
+                MiniHeroMetric(title: "Upcoming", value: "\(upcomingCount)", subtitle: "Scheduled lessons")
+                MiniHeroMetric(title: "Outstanding", value: AppFormat.currency(outstandingBalance), subtitle: "Still awaiting payment")
+                IncomeMetricCard(
+                    timeframe: $incomeTimeframe,
+                    total: incomeTotal,
+                    paidSessions: paidSessions
+                )
+            }
+        }
+        .padding(28)
+        .background(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            AppTheme.panelBackgroundSoft,
+                            AppTheme.panelBackground,
+                            AppTheme.accentSecondary.opacity(0.35)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
+        )
+    }
+}
+
+struct MiniHeroMetric: View {
+    let title: String
+    let value: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.42))
+            Text(value)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            Text(subtitle)
+                .foregroundStyle(AppTheme.mutedText)
+                .font(.system(size: 13.5))
+        }
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+}
+
+struct OverviewShortcutButton: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(AppTheme.panelBackgroundSoft)
+                        .frame(width: 42, height: 42)
+
+                    Image(systemName: systemImage)
+                        .foregroundStyle(AppTheme.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(AppTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.up.right.square")
+                    .foregroundStyle(Color.white.opacity(0.52))
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(AppTheme.panelBackgroundSoft)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(AppTheme.panelBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .appInteractiveButton()
+    }
 }
 
 struct BannerView: View {
@@ -979,14 +1311,22 @@ struct BannerView: View {
             Text(message)
                 .font(.system(size: 15.5, weight: .medium))
                 .lineLimit(2)
+                .foregroundStyle(.white)
             Spacer()
             Button("Dismiss") {
                 dismiss()
             }
+            .appInteractiveButton()
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .background(Color.accentColor.opacity(0.12))
+        .background(
+            LinearGradient(
+                colors: [AppTheme.accent.opacity(0.26), AppTheme.accentSecondary.opacity(0.18)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
     }
 }
 
@@ -999,21 +1339,22 @@ struct MetricCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title.uppercased())
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.46))
             Text(value)
                 .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(.white)
             Text(subtitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.mutedText)
         }
         .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(AppTheme.panelBackgroundSoft)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
         )
     }
 }
@@ -1027,31 +1368,64 @@ struct IncomeMetricCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("INCOME EARNED")
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.46))
 
-            Picker("Income timeframe", selection: $timeframe) {
+            HStack(spacing: 8) {
                 ForEach(IncomeTimeframe.allCases) { item in
-                    Text(item.title).tag(item)
+                    Button {
+                        timeframe = item
+                    } label: {
+                        Text(timeframeLabel(for: item))
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(timeframe == item ? .black : .white.opacity(0.82))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(timeframe == item ? AppTheme.accent : Color.white.opacity(0.06))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(
+                                        timeframe == item ? AppTheme.accent.opacity(0.88) : Color.white.opacity(0.05),
+                                        lineWidth: 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .appInteractiveButton(scaleAmount: 1.01)
                 }
             }
-            .pickerStyle(.segmented)
 
             Text(AppFormat.currency(total))
-                .font(.system(size: 30, weight: .semibold))
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
 
             Text("\(timeframe.subtitle) • \(paidSessions) paid session\(paidSessions == 1 ? "" : "s")")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.mutedText)
+                .font(.system(size: 13.5))
         }
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
         .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.white.opacity(0.05))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
         )
+    }
+
+    private func timeframeLabel(for timeframe: IncomeTimeframe) -> String {
+        switch timeframe {
+        case .weekly:
+            return "Week"
+        case .monthly:
+            return "Month"
+        case .yearly:
+            return "Year"
+        }
     }
 }
 
@@ -1065,15 +1439,17 @@ struct SessionSummaryRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
                 Text(subtitle)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.mutedText)
             }
             Spacer()
             Text(trailing)
                 .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                .background(Capsule().fill(AppTheme.accent.opacity(0.16)))
+                .foregroundStyle(.white)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
@@ -1085,7 +1461,7 @@ struct EmptyStateView: View {
 
     var body: some View {
         Text(message)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppTheme.mutedText)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
     }
@@ -1352,10 +1728,23 @@ private extension PaymentsView {
     func paymentActionButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
+                .font(.system(size: 14, weight: .semibold))
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(AppTheme.panelBackgroundSoft)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(AppTheme.panelBorder, lineWidth: 1)
+                )
         }
+        .buttonStyle(.plain)
+        .appInteractiveButton()
     }
 }

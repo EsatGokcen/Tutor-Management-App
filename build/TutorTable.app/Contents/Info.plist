@@ -6,6 +6,8 @@
 	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>TutorTable</string>
+	<key>CFBundleIconFile</key>
+	<string>TutorTable</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.esatgokcen.tutortable</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -14,6 +16,8 @@
 	<string>TutorTable</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
