@@ -6,13 +6,14 @@ import UserNotifications
 final class AppModel: ObservableObject {
     @Published private(set) var students: [Student] = []
     @Published private(set) var sessions: [LessonSession] = []
+    @Published private(set) var creditPurchases: [StudentCreditPurchase] = []
     @Published private(set) var settings = AppSettings()
     @Published private(set) var reminderStatusText = "Not requested yet"
     @Published private(set) var activeHotKeyDescription = "Command + Option + T"
     @Published var bannerMessage: String?
 
     let storagePaths = StoragePaths()
-    let audioRecorder: AudioRecorder
+    let voiceCommandManager = VoiceCommandManager()
 
     private let reminderManager = ReminderManager()
     private let launcherManager: LauncherManager
@@ -26,12 +27,7 @@ final class AppModel: ObservableObject {
             bannerMessage = "Could not create the TutorTable data folder: \(error.localizedDescription)"
         }
 
-        audioRecorder = AudioRecorder(audioDirectory: storagePaths.audioDirectory)
         launcherManager = LauncherManager()
-
-        audioRecorder.onRecordingFinished = { [weak self] fileName in
-            self?.bannerMessage = "Saved audio note: \(fileName)"
-        }
 
         load()
     }
@@ -48,13 +44,14 @@ final class AppModel: ObservableObject {
 
     var recentLessons: [LessonSession] {
         sessions
-            .filter { !$0.lessonNotes.isEmpty || !$0.homework.isEmpty || $0.audioNoteFilename != nil }
+            .filter { $0.endAt <= Date() }
+            .filter { !$0.lessonNotes.isEmpty || !$0.homework.isEmpty }
             .sorted { $0.startAt > $1.startAt }
     }
 
     var unpaidSessions: [LessonSession] {
         sessions
-            .filter { $0.paymentStatus != .paid }
+            .filter { $0.paymentStatus.needsAttention }
             .sorted { $0.startAt < $1.startAt }
     }
 
@@ -94,6 +91,11 @@ final class AppModel: ObservableObject {
         return SessionDraft(defaults: settings, student: preferredStudent)
     }
 
+    func newCreditPurchaseDraft(preferredStudentID: UUID? = nil) -> CreditPurchaseDraft {
+        let preferredStudent = preferredStudentID.flatMap { student(for: $0) } ?? studentsSorted.first
+        return CreditPurchaseDraft(student: preferredStudent)
+    }
+
     func copiedSessionDraft(from sessionID: UUID) -> SessionDraft? {
         guard let session = sessions.first(where: { $0.id == sessionID }) else {
             return nil
@@ -113,8 +115,30 @@ final class AppModel: ObservableObject {
             .sorted { $0.startAt > $1.startAt }
     }
 
+    func creditPurchases(for studentID: UUID) -> [StudentCreditPurchase] {
+        creditPurchases
+            .filter { $0.studentID == studentID }
+            .sorted {
+                if $0.purchasedAt == $1.purchasedAt {
+                    return $0.createdAt > $1.createdAt
+                }
+                return $0.purchasedAt > $1.purchasedAt
+            }
+    }
+
     func student(for studentID: UUID) -> Student? {
         students.first(where: { $0.id == studentID })
+    }
+
+    func creditStatus(for studentID: UUID) -> StudentCreditStatus? {
+        buildCreditStatuses()[studentID]
+    }
+
+    func creditStatuses() -> [StudentCreditStatus] {
+        buildCreditStatuses()
+            .values
+            .filter { $0.totalPurchasedHours > 0 || !$0.coveredSessions.isEmpty || !$0.purchases.isEmpty }
+            .sorted { $0.studentName.localizedCaseInsensitiveCompare($1.studentName) == .orderedAscending }
     }
 
     func filteredSessions(using filter: SessionFilter) -> [LessonSession] {
@@ -134,6 +158,12 @@ final class AppModel: ObservableObject {
             .sorted { $0.startAt > $1.startAt }
     }
 
+    func creditPurchases(in timeframe: IncomeTimeframe) -> [StudentCreditPurchase] {
+        creditPurchases
+            .filter { timeframe.contains($0.purchasedAt) }
+            .sorted { $0.purchasedAt > $1.purchasedAt }
+    }
+
     func incomeEarned(in timeframe: IncomeTimeframe) -> Double {
         sessions(in: timeframe)
             .filter { $0.paymentStatus.isPaid }
@@ -145,7 +175,7 @@ final class AppModel: ObservableObject {
     }
 
     func paymentSummary(in timeframe: IncomeTimeframe) -> PaymentSummary {
-        sessions(in: timeframe).reduce(into: PaymentSummary()) { summary, session in
+        var summary = sessions(in: timeframe).reduce(into: PaymentSummary()) { summary, session in
             switch session.paymentStatus {
             case .paid:
                 summary.collectedAmount += session.paymentAmount
@@ -153,11 +183,16 @@ final class AppModel: ObservableObject {
             case .unpaid:
                 summary.unpaidAmount += session.paymentAmount
                 summary.unpaidSessionCount += 1
-            case .partiallyPaid:
-                summary.partiallyPaidSessionValue += session.paymentAmount
-                summary.partiallyPaidSessionCount += 1
+            case .creditCovered:
+                summary.creditCoveredAmount += session.paymentAmount
+                summary.creditCoveredSessionCount += 1
             }
         }
+
+        let purchases = creditPurchases(in: timeframe)
+        summary.creditReceivedAmount = purchases.reduce(0) { $0 + $1.amountPaid }
+        summary.creditPurchaseCount = purchases.count
+        return summary
     }
 
     func paymentAttentionSessions(in timeframe: IncomeTimeframe) -> [LessonSession] {
@@ -180,10 +215,11 @@ final class AppModel: ObservableObject {
             let unpaidAmount = studentSessions
                 .filter { $0.paymentStatus == .unpaid }
                 .reduce(0) { $0 + $1.paymentAmount }
-            let partiallyPaidSessionValue = studentSessions
-                .filter { $0.paymentStatus == .partiallyPaid }
+            let creditCoveredAmount = studentSessions
+                .filter { $0.paymentStatus == .creditCovered }
                 .reduce(0) { $0 + $1.paymentAmount }
             let paidSessionCount = studentSessions.filter { $0.paymentStatus == .paid }.count
+            let creditCoveredSessionCount = studentSessions.filter { $0.paymentStatus == .creditCovered }.count
             let openSessionCount = studentSessions.filter { $0.paymentStatus.needsAttention }.count
 
             return StudentPaymentReport(
@@ -191,14 +227,15 @@ final class AppModel: ObservableObject {
                 studentName: student.fullName,
                 collectedAmount: collectedAmount,
                 unpaidAmount: unpaidAmount,
-                partiallyPaidSessionValue: partiallyPaidSessionValue,
+                creditCoveredAmount: creditCoveredAmount,
                 paidSessionCount: paidSessionCount,
+                creditCoveredSessionCount: creditCoveredSessionCount,
                 openSessionCount: openSessionCount
             )
         }
         .sorted {
-            ($0.collectedAmount + $0.unpaidAmount + $0.partiallyPaidSessionValue) >
-            ($1.collectedAmount + $1.unpaidAmount + $1.partiallyPaidSessionValue)
+            ($0.collectedAmount + $0.unpaidAmount + $0.creditCoveredAmount) >
+            ($1.collectedAmount + $1.unpaidAmount + $1.creditCoveredAmount)
         }
     }
 
@@ -226,6 +263,8 @@ final class AppModel: ObservableObject {
         let removedName = students.first(where: { $0.id == id })?.fullName ?? "student"
         students.removeAll { $0.id == id }
         sessions.removeAll { $0.studentID == id }
+        creditPurchases.removeAll { $0.studentID == id }
+        recalculateCreditCoverage()
         bannerMessage = "Deleted \(removedName) and any linked sessions."
         persist()
         Task {
@@ -249,6 +288,7 @@ final class AppModel: ObservableObject {
             bannerMessage = "Added a session for \(studentName(for: session.studentID))."
         }
 
+        recalculateCreditCoverage()
         persist()
         Task {
             await refreshReminders(requestingAccessIfNeeded: false)
@@ -262,11 +302,44 @@ final class AppModel: ObservableObject {
         }
 
         sessions.removeAll { $0.id == id }
+        recalculateCreditCoverage()
         bannerMessage = "Deleted the session for \(studentName(for: existing.studentID))."
         persist()
         Task {
             await refreshReminders(requestingAccessIfNeeded: false)
         }
+    }
+
+    @discardableResult
+    func saveCreditPurchase(_ draft: CreditPurchaseDraft) -> StudentCreditPurchase? {
+        guard draft.isValid else {
+            bannerMessage = "Choose a student and enter the credit hours and amount paid before saving."
+            return nil
+        }
+
+        let purchase = draft.makePurchase(for: draft.studentID.flatMap { student(for: $0) })
+        if let index = creditPurchases.firstIndex(where: { $0.id == purchase.id }) {
+            creditPurchases[index] = purchase
+            bannerMessage = "Updated the advance credit payment for \(studentName(for: purchase.studentID))."
+        } else {
+            creditPurchases.append(purchase)
+            bannerMessage = "Added advance credit for \(studentName(for: purchase.studentID))."
+        }
+
+        recalculateCreditCoverage()
+        persist()
+        return purchase
+    }
+
+    func deleteCreditPurchase(id: UUID) {
+        guard let existing = creditPurchases.first(where: { $0.id == id }) else {
+            return
+        }
+
+        creditPurchases.removeAll { $0.id == id }
+        recalculateCreditCoverage()
+        bannerMessage = "Deleted the advance credit payment for \(studentName(for: existing.studentID))."
+        persist()
     }
 
     func saveSettings(
@@ -291,27 +364,38 @@ final class AppModel: ObservableObject {
         activeHotKeyDescription = launcherManager.loadStatus()?.displayName ?? launcherManager.fallbackDisplayName
     }
 
-    func startRecording(for sessionID: UUID) {
-        audioRecorder.startRecording(for: sessionID)
-        if audioRecorder.errorMessage == nil {
-            bannerMessage = "Recording voice note..."
-        }
-    }
-
-    func stopRecording() -> String? {
-        let fileName = audioRecorder.stopRecording()
-        if let fileName {
-            bannerMessage = "Saved voice note \(fileName)."
-        }
-        return fileName
-    }
-
     func openDataFolder() {
         NSWorkspace.shared.open(storagePaths.rootDirectory)
     }
 
-    func revealAudioNote(named fileName: String) {
-        audioRecorder.revealAudioNote(named: fileName)
+    func applyVoiceCommandTranscript() {
+        let transcript = voiceCommandManager.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else {
+            bannerMessage = "Speak or type a voice command first."
+            return
+        }
+
+        do {
+            let intent = try VoiceCommandInterpreter.interpret(
+                transcript: transcript,
+                context: VoiceCommandContext(
+                    students: students,
+                    sessions: sessions,
+                    settings: settings,
+                    now: Date(),
+                    calendar: .current
+                )
+            )
+
+            switch intent {
+            case .createSession(let createIntent):
+                applyCreateSessionIntent(createIntent)
+            case .updateSessionPayment(let updateIntent):
+                applyUpdateSessionPaymentIntent(updateIntent)
+            }
+        } catch {
+            bannerMessage = error.localizedDescription
+        }
     }
 
     func dismissBanner() {
@@ -376,7 +460,6 @@ final class AppModel: ObservableObject {
                 paymentMethod: "Bank transfer",
                 lessonNotes: "",
                 homework: "",
-                audioNoteFilename: nil,
                 createdAt: now,
                 updatedAt: now
             ),
@@ -389,11 +472,10 @@ final class AppModel: ObservableObject {
                 endAt: calendar.date(byAdding: .minute, value: 90, to: calendar.date(byAdding: .day, value: 3, to: now) ?? now) ?? now,
                 reminderMinutesBefore: 45,
                 paymentAmount: 82.5,
-                paymentStatus: .partiallyPaid,
+                paymentStatus: .unpaid,
                 paymentMethod: "Cash",
                 lessonNotes: "Improved consistency on sixteenth-note runs after slowing down the metronome.",
                 homework: "Practice the alternate-picking pattern in three keys at 70 BPM.",
-                audioNoteFilename: nil,
                 createdAt: now,
                 updatedAt: now
             ),
@@ -410,7 +492,20 @@ final class AppModel: ObservableObject {
                 paymentMethod: "Card reader",
                 lessonNotes: "Built a cleaner strumming pattern and started dynamic control exercises.",
                 homework: "Practice the I-V-vi-IV progression with two dynamic levels.",
-                audioNoteFilename: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+        ]
+
+        let sampleCreditPurchases = [
+            StudentCreditPurchase(
+                id: UUID(),
+                studentID: lucas.id,
+                purchasedAt: now,
+                purchasedHours: 2,
+                discountAmount: 0,
+                amountPaid: 110,
+                note: "Two lessons paid in advance.",
                 createdAt: now,
                 updatedAt: now
             )
@@ -418,7 +513,9 @@ final class AppModel: ObservableObject {
 
         students = sampleStudents
         sessions = sampleSessions
-        bannerMessage = "Added sample students and sessions so you can test the full interface."
+        creditPurchases = sampleCreditPurchases
+        recalculateCreditCoverage()
+        bannerMessage = "Added sample students, sessions, and advance credit so you can test the full interface."
         persist()
 
         Task {
@@ -435,21 +532,30 @@ final class AppModel: ObservableObject {
             settings = snapshot.settings
             students = snapshot.students
             sessions = snapshot.sessions
+            creditPurchases = snapshot.creditPurchases
+            recalculateCreditCoverage()
         } catch CocoaError.fileReadNoSuchFile {
             settings = AppSettings()
             students = []
             sessions = []
+            creditPurchases = []
         } catch {
             bannerMessage = "TutorTable could not read the saved data file, so it started with a clean state."
             settings = AppSettings()
             students = []
             sessions = []
+            creditPurchases = []
         }
     }
 
     private func persist() {
         do {
-            let snapshot = AppSnapshot(settings: settings, students: students, sessions: sessions)
+            let snapshot = AppSnapshot(
+                settings: settings,
+                students: students,
+                sessions: sessions,
+                creditPurchases: creditPurchases
+            )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
@@ -496,4 +602,185 @@ final class AppModel: ObservableObject {
             return "Unknown"
         }
     }
+
+    private func applyCreateSessionIntent(_ intent: VoiceCreateSessionIntent) {
+        var draft = newSessionDraft(preferredStudentID: intent.studentID)
+        draft.startAt = intent.startAt
+        draft.endAt = intent.endAt
+        draft.paymentStatus = intent.paymentStatus
+
+        if let title = intent.title {
+            draft.title = title
+        }
+        if let location = intent.location {
+            draft.location = location
+        }
+        if let paymentAmount = intent.paymentAmount {
+            draft.paymentAmount = paymentAmount
+        }
+        if let paymentMethod = intent.paymentMethod {
+            draft.paymentMethod = paymentMethod
+        }
+
+        guard let session = saveSession(draft) else {
+            return
+        }
+
+        let studentName = studentName(for: session.studentID)
+        bannerMessage = "Created a session for \(studentName) on \(AppFormat.dateTimeFormatter.string(from: session.startAt))."
+    }
+
+    private func applyUpdateSessionPaymentIntent(_ intent: VoiceUpdateSessionPaymentIntent) {
+        guard let index = sessions.firstIndex(where: { $0.id == intent.sessionID }) else {
+            bannerMessage = "I couldn't find the session to update."
+            return
+        }
+
+        sessions[index].paymentStatus = intent.paymentStatus
+        if let paymentMethod = intent.paymentMethod {
+            sessions[index].paymentMethod = paymentMethod
+        }
+        sessions[index].updatedAt = Date()
+        recalculateCreditCoverage()
+        let session = sessions[index]
+
+        persist()
+        Task {
+            await refreshReminders(requestingAccessIfNeeded: false)
+        }
+
+        bannerMessage = "Updated \(studentName(for: session.studentID))'s session on \(AppFormat.shortDateFormatter.string(from: session.startAt)) and marked it \(statusSummary(for: intent.paymentStatus))."
+    }
+
+    private func statusSummary(for status: PaymentStatus) -> String {
+        switch status {
+        case .paid:
+            return "paid"
+        case .creditCovered:
+            return "covered by credit"
+        case .unpaid:
+            return "unpaid"
+        }
+    }
+
+    private func recalculateCreditCoverage() {
+        let coveredSessionIDs = Set(
+            buildCreditStatuses()
+                .values
+                .flatMap { $0.coveredSessions.map(\.id) }
+        )
+
+        for index in sessions.indices {
+            if sessions[index].paymentStatus == .paid {
+                continue
+            }
+
+            sessions[index].paymentStatus = coveredSessionIDs.contains(sessions[index].id) ? .creditCovered : .unpaid
+        }
+    }
+
+    private func buildCreditStatuses() -> [UUID: StudentCreditStatus] {
+        let knownStudentIDs = Set(students.map(\.id))
+            .union(Set(sessions.map(\.studentID)))
+            .union(Set(creditPurchases.map(\.studentID)))
+
+        var statuses: [UUID: StudentCreditStatus] = [:]
+
+        for studentID in knownStudentIDs {
+            let studentName = student(for: studentID)?.fullName ?? "Unknown Student"
+            let studentPurchases = creditPurchases(for: studentID)
+                .sorted {
+                    if $0.purchasedAt == $1.purchasedAt {
+                        return $0.createdAt < $1.createdAt
+                    }
+                    return $0.purchasedAt < $1.purchasedAt
+                }
+
+            var purchaseStates = studentPurchases.map {
+                CreditPurchaseState(purchase: $0, remainingHours: max(0, $0.purchasedHours))
+            }
+
+            let studentSessions = sessions(for: studentID)
+                .sorted { $0.startAt < $1.startAt }
+
+            var coveredSessions: [LessonSession] = []
+            var uncoveredSessions: [LessonSession] = []
+
+            for session in studentSessions {
+                guard session.paymentStatus != .paid else {
+                    continue
+                }
+
+                let requiredHours = session.durationHours
+                guard requiredHours > 0 else {
+                    uncoveredSessions.append(session)
+                    continue
+                }
+
+                let eligiblePurchaseIndices = purchaseStates.indices.filter { index in
+                    purchaseStates[index].purchase.purchasedAt <= session.startAt &&
+                    purchaseStates[index].remainingHours > 0.0001
+                }
+
+                let availableHours = eligiblePurchaseIndices.reduce(0.0) { total, index in
+                    total + purchaseStates[index].remainingHours
+                }
+
+                guard availableHours + 0.0001 >= requiredHours else {
+                    uncoveredSessions.append(session)
+                    continue
+                }
+
+                var remainingHoursToConsume = requiredHours
+                for index in eligiblePurchaseIndices {
+                    guard remainingHoursToConsume > 0.0001 else {
+                        break
+                    }
+
+                    let consumedHours = min(purchaseStates[index].remainingHours, remainingHoursToConsume)
+                    guard consumedHours > 0.0001 else {
+                        continue
+                    }
+
+                    purchaseStates[index].remainingHours -= consumedHours
+                    purchaseStates[index].coveredSessionIDs.append(session.id)
+                    remainingHoursToConsume -= consumedHours
+                }
+
+                coveredSessions.append(session)
+            }
+
+            let purchaseUsage = purchaseStates
+                .map { state in
+                    CreditPurchaseUsage(
+                        purchase: state.purchase,
+                        usedHours: max(0, state.purchase.purchasedHours - state.remainingHours),
+                        remainingHours: max(0, state.remainingHours),
+                        coveredSessionIDs: state.coveredSessionIDs
+                    )
+                }
+                .sorted { $0.purchase.purchasedAt > $1.purchase.purchasedAt }
+
+            statuses[studentID] = StudentCreditStatus(
+                studentID: studentID,
+                studentName: studentName,
+                totalPurchasedHours: studentPurchases.reduce(0) { $0 + $1.purchasedHours },
+                usedHours: purchaseUsage.reduce(0) { $0 + $1.usedHours },
+                remainingHours: purchaseUsage.reduce(0) { $0 + $1.remainingHours },
+                totalAmountPaid: studentPurchases.reduce(0) { $0 + $1.amountPaid },
+                totalDiscountAmount: studentPurchases.reduce(0) { $0 + $1.discountAmount },
+                coveredSessions: coveredSessions.sorted { $0.startAt < $1.startAt },
+                uncoveredSessions: uncoveredSessions.sorted { $0.startAt < $1.startAt },
+                purchases: purchaseUsage
+            )
+        }
+
+        return statuses
+    }
+}
+
+private struct CreditPurchaseState {
+    let purchase: StudentCreditPurchase
+    var remainingHours: Double
+    var coveredSessionIDs: [UUID] = []
 }

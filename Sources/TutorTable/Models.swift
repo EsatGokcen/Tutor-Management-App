@@ -2,7 +2,7 @@ import Foundation
 
 enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
     case unpaid
-    case partiallyPaid
+    case creditCovered
     case paid
 
     var id: String { rawValue }
@@ -11,19 +11,47 @@ enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .unpaid:
             return "Unpaid"
-        case .partiallyPaid:
-            return "Partially Paid"
+        case .creditCovered:
+            return "Credit Covered"
         case .paid:
             return "Paid"
         }
     }
 
+    static var manualCases: [PaymentStatus] {
+        [.unpaid, .paid]
+    }
+
     var isPaid: Bool {
-        self == .paid
+        self != .unpaid
     }
 
     var needsAttention: Bool {
-        self != .paid
+        self == .unpaid
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+
+        switch rawValue {
+        case Self.unpaid.rawValue:
+            self = .unpaid
+        case Self.creditCovered.rawValue:
+            self = .creditCovered
+        case Self.paid.rawValue:
+            self = .paid
+        case "partiallyPaid":
+            // Legacy partial states now require manual follow-up or credit coverage.
+            self = .unpaid
+        default:
+            self = .unpaid
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -33,12 +61,16 @@ struct AppSettings: Codable, Equatable {
     static let defaultSessionTypeValue = "Electric Guitar Lesson"
     static let defaultSessionLocationValue = ""
     static let defaultSessionPaymentMethodValue = ""
+    static let fiveHourCreditDiscountValue = 0.0
+    static let tenHourCreditDiscountValue = 0.0
 
     var defaultStudentSubject: String = defaultStudentSubjectValue
     var defaultStudentHourlyRate: Double = defaultStudentHourlyRateValue
     var defaultSessionType: String = defaultSessionTypeValue
     var defaultSessionLocation: String = defaultSessionLocationValue
     var defaultSessionPaymentMethod: String = defaultSessionPaymentMethodValue
+    var fiveHourCreditDiscount: Double = fiveHourCreditDiscountValue
+    var tenHourCreditDiscount: Double = tenHourCreditDiscountValue
 
     private enum CodingKeys: String, CodingKey {
         case defaultStudentSubject
@@ -46,6 +78,8 @@ struct AppSettings: Codable, Equatable {
         case defaultSessionType
         case defaultSessionLocation
         case defaultSessionPaymentMethod
+        case fiveHourCreditDiscount
+        case tenHourCreditDiscount
     }
 
     init() {}
@@ -57,6 +91,8 @@ struct AppSettings: Codable, Equatable {
         defaultSessionType = try container.decodeIfPresent(String.self, forKey: .defaultSessionType) ?? Self.defaultSessionTypeValue
         defaultSessionLocation = try container.decodeIfPresent(String.self, forKey: .defaultSessionLocation) ?? Self.defaultSessionLocationValue
         defaultSessionPaymentMethod = try container.decodeIfPresent(String.self, forKey: .defaultSessionPaymentMethod) ?? Self.defaultSessionPaymentMethodValue
+        fiveHourCreditDiscount = try container.decodeIfPresent(Double.self, forKey: .fiveHourCreditDiscount) ?? Self.fiveHourCreditDiscountValue
+        tenHourCreditDiscount = try container.decodeIfPresent(Double.self, forKey: .tenHourCreditDiscount) ?? Self.tenHourCreditDiscountValue
     }
 
     func encode(to encoder: Encoder) throws {
@@ -66,6 +102,8 @@ struct AppSettings: Codable, Equatable {
         try container.encode(defaultSessionType, forKey: .defaultSessionType)
         try container.encode(defaultSessionLocation, forKey: .defaultSessionLocation)
         try container.encode(defaultSessionPaymentMethod, forKey: .defaultSessionPaymentMethod)
+        try container.encode(fiveHourCreditDiscount, forKey: .fiveHourCreditDiscount)
+        try container.encode(tenHourCreditDiscount, forKey: .tenHourCreditDiscount)
     }
 }
 
@@ -178,26 +216,37 @@ struct LessonSession: Identifiable, Codable, Equatable {
     var paymentMethod: String
     var lessonNotes: String
     var homework: String
-    var audioNoteFilename: String?
     var createdAt: Date
     var updatedAt: Date
+
+    var durationHours: Double {
+        max(0, endAt.timeIntervalSince(startAt)) / 3_600
+    }
 }
 
 struct AppSnapshot: Codable {
     var settings: AppSettings = AppSettings()
     var students: [Student] = []
     var sessions: [LessonSession] = []
+    var creditPurchases: [StudentCreditPurchase] = []
 
-    init(settings: AppSettings = AppSettings(), students: [Student] = [], sessions: [LessonSession] = []) {
+    init(
+        settings: AppSettings = AppSettings(),
+        students: [Student] = [],
+        sessions: [LessonSession] = [],
+        creditPurchases: [StudentCreditPurchase] = []
+    ) {
         self.settings = settings
         self.students = students
         self.sessions = sessions
+        self.creditPurchases = creditPurchases
     }
 
     private enum CodingKeys: String, CodingKey {
         case settings
         case students
         case sessions
+        case creditPurchases
     }
 
     init(from decoder: Decoder) throws {
@@ -205,7 +254,20 @@ struct AppSnapshot: Codable {
         settings = try container.decodeIfPresent(AppSettings.self, forKey: .settings) ?? AppSettings()
         students = try container.decodeIfPresent([Student].self, forKey: .students) ?? []
         sessions = try container.decodeIfPresent([LessonSession].self, forKey: .sessions) ?? []
+        creditPurchases = try container.decodeIfPresent([StudentCreditPurchase].self, forKey: .creditPurchases) ?? []
     }
+}
+
+struct StudentCreditPurchase: Identifiable, Codable, Equatable {
+    let id: UUID
+    var studentID: UUID
+    var purchasedAt: Date
+    var purchasedHours: Double
+    var discountAmount: Double
+    var amountPaid: Double
+    var note: String
+    var createdAt: Date
+    var updatedAt: Date
 }
 
 struct StudentDraft {
@@ -265,7 +327,6 @@ struct SessionDraft {
     var paymentMethod: String = ""
     var lessonNotes: String = ""
     var homework: String = ""
-    var audioNoteFilename: String?
     var createdAt: Date?
 
     init() {}
@@ -291,7 +352,6 @@ struct SessionDraft {
         paymentMethod = session.paymentMethod
         lessonNotes = session.lessonNotes
         homework = session.homework
-        audioNoteFilename = session.audioNoteFilename
         createdAt = session.createdAt
     }
 
@@ -325,7 +385,60 @@ struct SessionDraft {
             paymentMethod: paymentMethod.trimmingCharacters(in: .whitespacesAndNewlines),
             lessonNotes: lessonNotes.trimmingCharacters(in: .whitespacesAndNewlines),
             homework: homework.trimmingCharacters(in: .whitespacesAndNewlines),
-            audioNoteFilename: audioNoteFilename,
+            createdAt: createdAt ?? Date(),
+            updatedAt: Date()
+        )
+    }
+}
+
+struct CreditPurchaseDraft {
+    var id: UUID?
+    var studentID: UUID?
+    var purchasedAt: Date = Date()
+    var purchasedHours: Double = 0
+    var discountAmount: Double = 0
+    var amountPaid: Double = 0
+    var note: String = ""
+    var createdAt: Date?
+
+    init() {}
+
+    init(student: Student? = nil) {
+        studentID = student?.id
+    }
+
+    init(purchase: StudentCreditPurchase) {
+        id = purchase.id
+        studentID = purchase.studentID
+        purchasedAt = purchase.purchasedAt
+        purchasedHours = purchase.purchasedHours
+        discountAmount = purchase.discountAmount
+        amountPaid = purchase.amountPaid
+        note = purchase.note
+        createdAt = purchase.createdAt
+    }
+
+    var isValid: Bool {
+        studentID != nil && purchasedHours > 0 && amountPaid >= 0 && discountAmount >= 0
+    }
+
+    func standardValue(for student: Student?) -> Double {
+        (student?.hourlyRate ?? 0) * purchasedHours
+    }
+
+    func impliedDiscount(for student: Student?) -> Double {
+        max(0, standardValue(for: student) - amountPaid)
+    }
+
+    func makePurchase(for student: Student?) -> StudentCreditPurchase {
+        StudentCreditPurchase(
+            id: id ?? UUID(),
+            studentID: studentID ?? UUID(),
+            purchasedAt: purchasedAt,
+            purchasedHours: purchasedHours,
+            discountAmount: impliedDiscount(for: student),
+            amountPaid: amountPaid,
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines),
             createdAt: createdAt ?? Date(),
             updatedAt: Date()
         )
@@ -425,18 +538,41 @@ enum AppFormat {
         return formatter
     }()
 
+    static let decimalFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        return formatter
+    }()
+
     static func currency(_ amount: Double) -> String {
         currencyFormatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
+    }
+
+    static func number(_ value: Double) -> String {
+        decimalFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    static func hours(_ value: Double) -> String {
+        "\(number(value)) hour\(abs(value - 1) < 0.01 ? "" : "s")"
     }
 }
 
 struct PaymentSummary {
     var collectedAmount: Double = 0
+    var creditReceivedAmount: Double = 0
     var unpaidAmount: Double = 0
-    var partiallyPaidSessionValue: Double = 0
+    var creditCoveredAmount: Double = 0
     var paidSessionCount: Int = 0
     var unpaidSessionCount: Int = 0
-    var partiallyPaidSessionCount: Int = 0
+    var creditCoveredSessionCount: Int = 0
+    var creditPurchaseCount: Int = 0
+
+    var totalEarnedAmount: Double {
+        collectedAmount + creditCoveredAmount
+    }
 }
 
 struct StudentPaymentReport: Identifiable {
@@ -444,9 +580,50 @@ struct StudentPaymentReport: Identifiable {
     let studentName: String
     let collectedAmount: Double
     let unpaidAmount: Double
-    let partiallyPaidSessionValue: Double
+    let creditCoveredAmount: Double
     let paidSessionCount: Int
+    let creditCoveredSessionCount: Int
     let openSessionCount: Int
 
     var id: UUID { studentID }
+
+    var totalEarnedAmount: Double {
+        collectedAmount + creditCoveredAmount
+    }
+}
+
+struct CreditPurchaseUsage: Identifiable {
+    let purchase: StudentCreditPurchase
+    let usedHours: Double
+    let remainingHours: Double
+    let coveredSessionIDs: [UUID]
+
+    var id: UUID { purchase.id }
+}
+
+struct StudentCreditStatus: Identifiable {
+    let studentID: UUID
+    let studentName: String
+    let totalPurchasedHours: Double
+    let usedHours: Double
+    let remainingHours: Double
+    let totalAmountPaid: Double
+    let totalDiscountAmount: Double
+    let coveredSessions: [LessonSession]
+    let uncoveredSessions: [LessonSession]
+    let purchases: [CreditPurchaseUsage]
+
+    var id: UUID { studentID }
+
+    var coveredSessionCount: Int {
+        coveredSessions.count
+    }
+
+    var nextUncoveredSession: LessonSession? {
+        uncoveredSessions.sorted { $0.startAt < $1.startAt }.first
+    }
+
+    var lastCoveredSession: LessonSession? {
+        coveredSessions.sorted { $0.startAt < $1.startAt }.last
+    }
 }

@@ -32,6 +32,11 @@ struct RootView: View {
                         Label("Calendar", systemImage: "calendar.day.timeline.left")
                     }
 
+                VoiceInputView()
+                    .tabItem {
+                        Label("Voice", systemImage: "waveform.and.mic")
+                    }
+
                 PaymentsView()
                     .tabItem {
                         Label("Payments", systemImage: "sterlingsign.circle")
@@ -104,7 +109,7 @@ struct OverviewView: View {
                 GroupBox("Recent Lesson Memory") {
                     VStack(alignment: .leading, spacing: 14) {
                         if appModel.recentLessons.isEmpty {
-                            EmptyStateView(message: "Past lessons with notes, homework, or audio notes will appear here.")
+                            EmptyStateView(message: "Past lessons with notes or homework will appear here.")
                         } else {
                             ForEach(Array(appModel.recentLessons.prefix(8))) { session in
                                 VStack(alignment: .leading, spacing: 8) {
@@ -119,12 +124,6 @@ struct OverviewView: View {
                                         Text("Homework: \(session.homework)")
                                             .foregroundStyle(.secondary)
                                             .lineLimit(2)
-                                    }
-                                    if let audioNoteFilename = session.audioNoteFilename {
-                                        Button("Reveal Audio Note") {
-                                            appModel.revealAudioNote(named: audioNoteFilename)
-                                        }
-                                        .buttonStyle(.link)
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -386,8 +385,19 @@ struct SessionsView: View {
                                 .frame(width: 160)
                             }
 
-                            Picker("Payment status", selection: $draft.paymentStatus) {
-                                ForEach(PaymentStatus.allCases) { status in
+                            if draft.paymentStatus == .creditCovered {
+                                Text("This session is currently covered by advance credit. If you mark it as paid manually, that credit will stay available for another lesson.")
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Picker(
+                                "Payment status",
+                                selection: Binding(
+                                    get: { draft.paymentStatus == .paid ? .paid : .unpaid },
+                                    set: { draft.paymentStatus = $0 }
+                                )
+                            ) {
+                                ForEach(PaymentStatus.manualCases) { status in
                                     Text(status.title).tag(status)
                                 }
                             }
@@ -406,48 +416,6 @@ struct SessionsView: View {
                                     .frame(minHeight: 110)
                             }
                         }
-                        .padding(.top, 8)
-                    }
-
-                    GroupBox("Voice Notes") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Record a quick lesson recap with your Mac microphone and attach it to this session.")
-                                .foregroundStyle(.secondary)
-
-                            HStack {
-                                if appModel.audioRecorder.isRecording {
-                                    Button("Stop Recording") {
-                                        draft.audioNoteFilename = appModel.stopRecording()
-                                    }
-                                } else {
-                                    Button("Record Voice Note") {
-                                        let targetID = draft.id ?? UUID()
-                                        if draft.id == nil {
-                                            draft.id = targetID
-                                        }
-                                        appModel.startRecording(for: targetID)
-                                    }
-                                }
-
-                                if let audioNoteFilename = draft.audioNoteFilename {
-                                    Button("Reveal Audio File") {
-                                        appModel.revealAudioNote(named: audioNoteFilename)
-                                    }
-                                }
-                            }
-
-                            if let audioNoteFilename = draft.audioNoteFilename {
-                                Text("Attached file: \(audioNoteFilename)")
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-
-                            if let errorMessage = appModel.audioRecorder.errorMessage {
-                                Text(errorMessage)
-                                    .foregroundStyle(.red)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 8)
                     }
 
@@ -538,7 +506,6 @@ struct SessionsView: View {
         let currentPaymentStatus = draft.paymentStatus
         let currentLessonNotes = draft.lessonNotes
         let currentHomework = draft.homework
-        let currentAudioNoteFilename = draft.audioNoteFilename
         let currentCreatedAt = draft.createdAt
         let currentID = draft.id
 
@@ -551,7 +518,6 @@ struct SessionsView: View {
         draft.paymentStatus = currentPaymentStatus
         draft.lessonNotes = currentLessonNotes
         draft.homework = currentHomework
-        draft.audioNoteFilename = currentAudioNoteFilename
     }
 
     private func copySelectedSession() {
@@ -570,12 +536,22 @@ struct SessionsView: View {
 struct PaymentsView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var timeframe: IncomeTimeframe = .monthly
+    @State private var selectedCreditPurchaseID: UUID?
+    @State private var creditDraft = CreditPurchaseDraft()
 
     var body: some View {
         let summary = appModel.paymentSummary(in: timeframe)
         let openSessions = appModel.paymentAttentionSessions(in: timeframe)
         let reports = appModel.studentPaymentReports(in: timeframe)
         let paymentSessions = appModel.sessions(in: timeframe)
+        let creditPurchases = appModel.creditPurchases(in: timeframe)
+        let creditStatuses = appModel.creditStatuses()
+        let activeCreditHours = creditStatuses.reduce(0) { $0 + $1.remainingHours }
+        let studentsWithCredit = creditStatuses.filter { $0.remainingHours > 0 }.count
+        let selectedStudent = creditDraft.studentID.flatMap { appModel.student(for: $0) }
+        let standardValue = creditDraft.standardValue(for: selectedStudent)
+        let impliedDiscount = creditDraft.impliedDiscount(for: selectedStudent)
+        let effectiveHourlyRate = creditDraft.purchasedHours > 0 ? (creditDraft.amountPaid / creditDraft.purchasedHours) : 0
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -590,13 +566,28 @@ struct PaymentsView: View {
                 .pickerStyle(.segmented)
 
                 LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+                    columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
                     spacing: 18
                 ) {
                     MetricCard(
-                        title: "Collected",
+                        title: "Total Earned",
+                        value: AppFormat.currency(summary.totalEarnedAmount),
+                        subtitle: "\(summary.paidSessionCount + summary.creditCoveredSessionCount) earned session\(summary.paidSessionCount + summary.creditCoveredSessionCount == 1 ? "" : "s")"
+                    )
+                    MetricCard(
+                        title: "Directly Paid",
                         value: AppFormat.currency(summary.collectedAmount),
                         subtitle: "\(summary.paidSessionCount) paid session\(summary.paidSessionCount == 1 ? "" : "s")"
+                    )
+                    MetricCard(
+                        title: "Credit Received",
+                        value: AppFormat.currency(summary.creditReceivedAmount),
+                        subtitle: "\(summary.creditPurchaseCount) advance payment\(summary.creditPurchaseCount == 1 ? "" : "s")"
+                    )
+                    MetricCard(
+                        title: "Credit Covered",
+                        value: AppFormat.currency(summary.creditCoveredAmount),
+                        subtitle: "\(summary.creditCoveredSessionCount) session\(summary.creditCoveredSessionCount == 1 ? "" : "s") covered"
                     )
                     MetricCard(
                         title: "Awaiting",
@@ -604,15 +595,186 @@ struct PaymentsView: View {
                         subtitle: "\(summary.unpaidSessionCount) unpaid session\(summary.unpaidSessionCount == 1 ? "" : "s")"
                     )
                     MetricCard(
-                        title: "Partial",
-                        value: AppFormat.currency(summary.partiallyPaidSessionValue),
-                        subtitle: "\(summary.partiallyPaidSessionCount) session\(summary.partiallyPaidSessionCount == 1 ? "" : "s") marked partial"
+                        title: "Active Credit",
+                        value: AppFormat.hours(activeCreditHours),
+                        subtitle: studentsWithCredit == 0 ? "No student has remaining credit" : "\(studentsWithCredit) student balance\(studentsWithCredit == 1 ? "" : "s") still active"
                     )
-                    MetricCard(
-                        title: "Tracked",
-                        value: AppFormat.currency(paymentSessions.reduce(0) { $0 + $1.paymentAmount }),
-                        subtitle: timeframe.subtitle
-                    )
+                }
+
+                HStack(alignment: .top, spacing: 18) {
+                    GroupBox("Add Or Edit Advance Credit") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if appModel.students.isEmpty {
+                                EmptyStateView(message: "Create a student before logging advance credit.")
+                            } else {
+                                Text("Log prepaid hours here. TutorTable will automatically mark eligible sessions as covered, show which lessons are already paid for, and tell you when the student's credit runs out.")
+                                    .foregroundStyle(.secondary)
+
+                                HStack(alignment: .top, spacing: 18) {
+                                    VStack(alignment: .leading, spacing: 14) {
+                                        Picker("Student", selection: Binding(
+                                            get: { creditDraft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
+                                            set: { creditDraft.studentID = $0 }
+                                        )) {
+                                            ForEach(appModel.studentsSorted) { student in
+                                                Text(student.fullName).tag(student.id)
+                                            }
+                                        }
+
+                                        DatePicker("Payment date", selection: $creditDraft.purchasedAt)
+
+                                        HStack(spacing: 14) {
+                                            PaymentFieldCard(title: "Hours Bought") {
+                                                TextField(
+                                                    "0.00",
+                                                    value: $creditDraft.purchasedHours,
+                                                    format: .number.precision(.fractionLength(2))
+                                                )
+                                                .textFieldStyle(.roundedBorder)
+                                            }
+
+                                            PaymentFieldCard(title: "Amount Paid") {
+                                                TextField(
+                                                    "0.00",
+                                                    value: $creditDraft.amountPaid,
+                                                    format: .number.precision(.fractionLength(2))
+                                                )
+                                                .textFieldStyle(.roundedBorder)
+                                            }
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Payment note")
+                                                .font(.headline)
+                                            TextEditor(text: $creditDraft.note)
+                                                .frame(minHeight: 112)
+                                                .padding(8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                        .fill(Color(nsColor: .windowBackgroundColor))
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                                )
+                                        }
+
+                                        LazyVGrid(
+                                            columns: [GridItem(.flexible()), GridItem(.flexible())],
+                                            spacing: 10
+                                        ) {
+                                            paymentActionButton("Set Standard Price") {
+                                                creditDraft.amountPaid = standardValue
+                                            }
+                                            .disabled(creditDraft.studentID == nil || creditDraft.purchasedHours <= 0)
+
+                                            paymentActionButton("New Credit Entry") {
+                                                selectedCreditPurchaseID = nil
+                                                creditDraft = appModel.newCreditPurchaseDraft()
+                                            }
+                                            .disabled(appModel.students.isEmpty)
+
+                                            paymentActionButton("Delete Credit Entry") {
+                                                guard let selectedCreditPurchaseID else {
+                                                    return
+                                                }
+                                                appModel.deleteCreditPurchase(id: selectedCreditPurchaseID)
+                                                self.selectedCreditPurchaseID = nil
+                                                creditDraft = appModel.newCreditPurchaseDraft()
+                                            }
+                                            .disabled(selectedCreditPurchaseID == nil)
+
+                                            paymentActionButton("Save Credit Entry") {
+                                                if let savedPurchase = appModel.saveCreditPurchase(creditDraft) {
+                                                    selectedCreditPurchaseID = savedPurchase.id
+                                                    creditDraft = CreditPurchaseDraft(purchase: savedPurchase)
+                                                }
+                                            }
+                                            .disabled(appModel.students.isEmpty || !creditDraft.isValid)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    VStack(alignment: .leading, spacing: 14) {
+                                        Text("Payment Snapshot")
+                                            .font(.headline)
+
+                                        PaymentInfoRow(
+                                            label: "Standard value",
+                                            value: AppFormat.currency(standardValue)
+                                        )
+                                        PaymentInfoRow(
+                                            label: "Implied discount",
+                                            value: AppFormat.currency(impliedDiscount)
+                                        )
+                                        PaymentInfoRow(
+                                            label: "Effective hourly",
+                                            value: creditDraft.purchasedHours > 0 ? AppFormat.currency(effectiveHourlyRate) : "Not set"
+                                        )
+                                        PaymentInfoRow(
+                                            label: "Selected student rate",
+                                            value: selectedStudent.map { AppFormat.currency($0.hourlyRate) } ?? "Not set"
+                                        )
+
+                                        Text("Set the number of hours and the total amount collected. Any difference from the standard value is treated as the discount automatically.")
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .frame(width: 260, alignment: .leading)
+                                    .padding(18)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                            .fill(Color(nsColor: .windowBackgroundColor))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
+
+                    GroupBox("Credit Purchase Activity") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if creditPurchases.isEmpty {
+                                EmptyStateView(message: "Advance payments in the selected timeframe will appear here.")
+                            } else {
+                                ForEach(creditPurchases) { purchase in
+                                    Button {
+                                        selectedCreditPurchaseID = purchase.id
+                                        creditDraft = CreditPurchaseDraft(purchase: purchase)
+                                    } label: {
+                                        CreditPurchaseRow(
+                                            purchase: purchase,
+                                            studentName: appModel.studentName(for: purchase.studentID),
+                                            isSelected: purchase.id == selectedCreditPurchaseID
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+
+                GroupBox("Student Credit Balances") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if creditStatuses.isEmpty {
+                            EmptyStateView(message: "Student credit balances will appear here after you log an advance payment.")
+                        } else {
+                            ForEach(creditStatuses) { status in
+                                StudentCreditStatusRow(status: status)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
                 }
 
                 GroupBox("Student Payment Report") {
@@ -632,7 +794,7 @@ struct PaymentsView: View {
                 GroupBox("Sessions Requiring Attention") {
                     VStack(alignment: .leading, spacing: 14) {
                         if openSessions.isEmpty {
-                            EmptyStateView(message: "No unpaid or partially paid sessions in the selected timeframe.")
+                            EmptyStateView(message: "No unpaid sessions in the selected timeframe.")
                         } else {
                             ForEach(openSessions) { session in
                                 PaymentSessionRow(
@@ -646,7 +808,7 @@ struct PaymentsView: View {
                     .padding(.top, 8)
                 }
 
-                GroupBox("Payment Activity") {
+                GroupBox("Session Payment Activity") {
                     VStack(alignment: .leading, spacing: 14) {
                         if paymentSessions.isEmpty {
                             EmptyStateView(message: "No payment activity for the selected timeframe yet.")
@@ -664,6 +826,35 @@ struct PaymentsView: View {
                 }
             }
             .padding(.bottom, 20)
+        }
+        .onAppear {
+            if appModel.students.isEmpty {
+                creditDraft = CreditPurchaseDraft()
+            } else if let selectedCreditPurchaseID,
+                      let purchase = appModel.creditPurchases.first(where: { $0.id == selectedCreditPurchaseID }) {
+                creditDraft = CreditPurchaseDraft(purchase: purchase)
+            } else {
+                creditDraft = appModel.newCreditPurchaseDraft()
+            }
+        }
+        .onChange(of: appModel.students.count) { _ in
+            guard selectedCreditPurchaseID == nil else {
+                return
+            }
+
+            if appModel.students.isEmpty {
+                creditDraft = CreditPurchaseDraft()
+            } else if creditDraft.studentID == nil {
+                creditDraft = appModel.newCreditPurchaseDraft()
+            }
+        }
+        .onChange(of: selectedCreditPurchaseID) { newValue in
+            guard let newValue,
+                  let purchase = appModel.creditPurchases.first(where: { $0.id == newValue }) else {
+                return
+            }
+
+            creditDraft = CreditPurchaseDraft(purchase: purchase)
         }
     }
 }
@@ -727,7 +918,6 @@ struct SettingsView: View {
                             defaultSessionPaymentMethod: defaultSessionPaymentMethod
                         )
                     }
-
                     Button("Reload Saved Values") {
                         syncFromSettings()
                     }
@@ -910,15 +1100,145 @@ struct StudentPaymentReportRow: View {
                 Text(report.studentName)
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Text("\(report.paidSessionCount) paid • \(report.openSessionCount) open")
+                Text("\(report.paidSessionCount) paid • \(report.creditCoveredSessionCount) credit covered • \(report.openSessionCount) open")
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 18) {
+                PaymentMiniMetric(title: "Total Earned", value: AppFormat.currency(report.totalEarnedAmount))
                 PaymentMiniMetric(title: "Collected", value: AppFormat.currency(report.collectedAmount))
+                PaymentMiniMetric(title: "Credit Covered", value: AppFormat.currency(report.creditCoveredAmount))
                 PaymentMiniMetric(title: "Awaiting", value: AppFormat.currency(report.unpaidAmount))
-                PaymentMiniMetric(title: "Partial", value: AppFormat.currency(report.partiallyPaidSessionValue))
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+    }
+}
+
+struct CreditPurchaseRow: View {
+    let purchase: StudentCreditPurchase
+    let studentName: String
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(studentName)
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Text(AppFormat.shortDateFormatter.string(from: purchase.purchasedAt))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("\(AppFormat.hours(purchase.purchasedHours)) • Paid \(AppFormat.currency(purchase.amountPaid))")
+                .foregroundStyle(.secondary)
+
+            if purchase.discountAmount > 0 {
+                Text("Discount: \(AppFormat.currency(purchase.discountAmount))")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+            }
+
+            if !purchase.note.isEmpty {
+                Text(purchase.note)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.accentColor.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+}
+
+struct StudentCreditStatusRow: View {
+    let status: StudentCreditStatus
+
+    private var futureCoveredSessions: [LessonSession] {
+        status.coveredSessions
+            .filter { $0.endAt >= Date() }
+            .sorted { $0.startAt < $1.startAt }
+    }
+
+    private var futureUncoveredSession: LessonSession? {
+        status.uncoveredSessions
+            .filter { $0.endAt >= Date() }
+            .sorted { $0.startAt < $1.startAt }
+            .first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(status.studentName)
+                        .font(.title3.weight(.semibold))
+                    if let futureUncoveredSession {
+                        Text("Credit runs out before \(AppFormat.dateTimeFormatter.string(from: futureUncoveredSession.startAt)).")
+                            .foregroundStyle(.secondary)
+                    } else if let lastCovered = futureCoveredSessions.last {
+                        Text("Current credit covers lessons through \(AppFormat.dateTimeFormatter.string(from: lastCovered.endAt)).")
+                            .foregroundStyle(.secondary)
+                    } else if status.remainingHours > 0 {
+                        Text("No uncovered future lessons yet. \(AppFormat.hours(status.remainingHours)) still available.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No advance credit remaining.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Text(AppFormat.hours(status.remainingHours))
+                    .font(.headline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+            }
+
+            HStack(spacing: 18) {
+                PaymentMiniMetric(title: "Bought", value: AppFormat.hours(status.totalPurchasedHours))
+                PaymentMiniMetric(title: "Used", value: AppFormat.hours(status.usedHours))
+                PaymentMiniMetric(title: "Paid", value: AppFormat.currency(status.totalAmountPaid))
+                PaymentMiniMetric(title: "Discount", value: AppFormat.currency(status.totalDiscountAmount))
+            }
+
+            if !futureCoveredSessions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Covered Lessons")
+                        .font(.headline)
+
+                    ForEach(futureCoveredSessions) { session in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(session.title) • \(AppFormat.dateTimeFormatter.string(from: session.startAt))")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(AppFormat.hours(session.durationHours)) • \(AppFormat.currency(session.paymentAmount))")
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Text(session.paymentStatus.title)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color.blue.opacity(0.12)))
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                }
+            }
+
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
@@ -960,8 +1280,8 @@ struct PaymentSessionRow: View {
         switch status {
         case .paid:
             return .green
-        case .partiallyPaid:
-            return .orange
+        case .creditCovered:
+            return .blue
         case .unpaid:
             return .red
         }
@@ -981,5 +1301,61 @@ struct PaymentMiniMetric: View {
                 .font(.headline)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PaymentFieldCard<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+struct PaymentInfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private extension PaymentsView {
+    func paymentActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
