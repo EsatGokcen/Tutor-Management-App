@@ -61,48 +61,32 @@ enum AppTheme {
 
 struct AppSidebar: View {
     @Binding var selectedSection: AppSection
+    @Binding var isCollapsed: Bool
+
+    private let animation = Animation.spring(response: 0.34, dampingFraction: 0.82)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [AppTheme.accent, AppTheme.accentSecondary],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 54, height: 54)
-
-                    Image(systemName: "graduationcap.circle.fill")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("TutorTable")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-            }
+        VStack(alignment: .leading, spacing: 22) {
+            sidebarHeader
 
             VStack(spacing: 10) {
                 ForEach(AppSection.allCases) { section in
                     AppSidebarButton(
                         section: section,
-                        isSelected: selectedSection == section
+                        isSelected: selectedSection == section,
+                        isCollapsed: isCollapsed
                     ) {
                         selectedSection = section
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
 
             Spacer(minLength: 0)
         }
-        .padding(24)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, isCollapsed ? 14 : 18)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             LinearGradient(
                 colors: [AppTheme.sidebarBackground, AppTheme.sidebarBackground.opacity(0.94)],
@@ -115,49 +99,181 @@ struct AppSidebar: View {
                 .fill(Color.white.opacity(0.06))
                 .frame(width: 1)
         }
+        .animation(animation, value: isCollapsed)
+    }
+
+    private var sidebarHeader: some View {
+        Group {
+            if isCollapsed {
+                VStack(spacing: 12) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        sidebarToggleButton
+                    }
+
+                    sidebarBrandMark
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .transition(.opacity)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        sidebarToggleButton
+                    }
+
+                    HStack(spacing: 14) {
+                        sidebarBrandMark
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("TutorTable")
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.82)
+                                .allowsTightening(true)
+                                .layoutPriority(1)
+                        }
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+
+                        Spacer(minLength: 0)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private var sidebarBrandMark: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [AppTheme.accent, AppTheme.accentSecondary],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 54, height: 54)
+
+            Image(systemName: "graduationcap.circle.fill")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private var sidebarToggleButton: some View {
+        Button {
+            withAnimation(animation) {
+                isCollapsed.toggle()
+            }
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(isCollapsed ? 0.09 : 0.06))
+                    .frame(width: 30, height: 30)
+
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.left")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.92))
+            }
+        }
+        .buttonStyle(.plain)
+        .help(isCollapsed ? "Expand Sidebar" : "Collapse Sidebar")
+        .appInteractiveButton(scaleAmount: 1.045)
     }
 }
 
 struct AppSidebarButton: View {
     let section: AppSection
     let isSelected: Bool
+    let isCollapsed: Bool
     let action: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: isCollapsed ? 0 : 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isSelected ? Color.white.opacity(0.16) : Color.white.opacity(0.05))
-                        .frame(width: 42, height: 42)
+                        .fill(iconTileFill)
+                        .frame(width: 44, height: 44)
 
                     Image(systemName: section.systemImage)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isSelected ? .white : AppTheme.mutedText)
+                        .foregroundStyle(iconColor)
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(section.title)
-                        .font(.system(size: 15.5, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
+                if !isCollapsed {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(section.title)
+                            .font(.system(size: 15.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
-            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+            .padding(.horizontal, isCollapsed ? 10 : 12)
             .padding(.vertical, 10)
             .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(isSelected ? AppTheme.accent.opacity(0.20) : Color.clear)
+                    .fill(backgroundFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(isSelected ? AppTheme.accent.opacity(0.40) : Color.white.opacity(0.04), lineWidth: 1)
+                    .stroke(borderColor, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
-        .appInteractiveButton()
+        .help(section.title)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .appInteractiveButton(scaleAmount: isCollapsed ? 1.055 : 1.042)
+        .animation(.spring(response: 0.24, dampingFraction: 0.82), value: isHovered)
+        .animation(.spring(response: 0.30, dampingFraction: 0.84), value: isCollapsed)
+    }
+
+    private var backgroundFill: Color {
+        if isSelected {
+            return AppTheme.accent.opacity(isHovered ? 0.34 : 0.24)
+        }
+        if isHovered {
+            return Color.white.opacity(0.10)
+        }
+        return Color.clear
+    }
+
+    private var borderColor: Color {
+        if isSelected {
+            return AppTheme.accent.opacity(isHovered ? 0.72 : 0.46)
+        }
+        if isHovered {
+            return AppTheme.accent.opacity(0.24)
+        }
+        return Color.white.opacity(0.04)
+    }
+
+    private var iconTileFill: Color {
+        if isSelected {
+            return Color.white.opacity(0.18)
+        }
+        if isHovered {
+            return AppTheme.accent.opacity(0.18)
+        }
+        return Color.white.opacity(0.05)
+    }
+
+    private var iconColor: Color {
+        if isSelected || isHovered {
+            return .white
+        }
+        return AppTheme.mutedText
     }
 }
 

@@ -30,6 +30,19 @@ cp /Library/Developer/CommandLineTools/usr/include/swift/module.modulemap "$TOOL
 
 /usr/bin/swiftc \
   -O \
+  -target arm64-apple-macosx13.0 \
+  -resource-dir "$SWIFT_RESOURCE_DIR" \
+  -module-cache-path "$MODULE_CACHE_DIR" \
+  -o "$BUILD_DIR/generate_app_icon" \
+  "$ROOT_DIR/Scripts/generate_app_icon.swift" \
+  -framework AppKit
+
+( cd "$ROOT_DIR" && "$BUILD_DIR/generate_app_icon" )
+/bin/rm -f "$ROOT_DIR/App/TutorTable.icns"
+/usr/bin/iconutil -c icns "$ROOT_DIR/App/AppIcon.iconset" -o "$ROOT_DIR/App/TutorTable.icns"
+
+/usr/bin/swiftc \
+  -O \
   -emit-executable \
   -target arm64-apple-macosx13.0 \
   -resource-dir "$SWIFT_RESOURCE_DIR" \

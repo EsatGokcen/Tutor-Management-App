@@ -3,11 +3,14 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var selectedSection: AppSection = .overview
+    @AppStorage("sidebarCollapsed") private var isSidebarCollapsed = false
 
     var body: some View {
         GeometryReader { proxy in
             let isCompactShell = proxy.size.width < 1240
-            let sidebarWidth: CGFloat = isCompactShell ? 236 : 280
+            let expandedSidebarWidth: CGFloat = isCompactShell ? 242 : 280
+            let collapsedSidebarWidth: CGFloat = 92
+            let sidebarWidth: CGFloat = isSidebarCollapsed ? collapsedSidebarWidth : expandedSidebarWidth
             let outerPadding: CGFloat = isCompactShell ? 12 : 18
             let contentPadding: CGFloat = isCompactShell ? 18 : 28
 
@@ -22,7 +25,10 @@ struct RootView: View {
                 .ignoresSafeArea()
 
                 HStack(spacing: 0) {
-                    AppSidebar(selectedSection: $selectedSection)
+                    AppSidebar(
+                        selectedSection: $selectedSection,
+                        isCollapsed: $isSidebarCollapsed
+                    )
                         .frame(width: sidebarWidth)
 
                     VStack(spacing: 0) {
@@ -61,6 +67,7 @@ struct RootView: View {
                         .padding(outerPadding)
                     }
                 }
+                .animation(.spring(response: 0.34, dampingFraction: 0.84), value: isSidebarCollapsed)
             }
         }
         .font(.system(size: 15.5))
@@ -1608,8 +1615,8 @@ struct StudentCreditStatusRow: View {
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
-                                .background(Capsule().fill(Color.blue.opacity(0.12)))
-                                .foregroundStyle(.blue)
+                                .background(Capsule().fill(Color.green.opacity(0.12)))
+                                .foregroundStyle(.green)
                         }
                     }
                 }
@@ -1657,7 +1664,7 @@ struct PaymentSessionRow: View {
         case .paid:
             return .green
         case .creditCovered:
-            return .blue
+            return .green
         case .unpaid:
             return .red
         }

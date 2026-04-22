@@ -91,6 +91,40 @@ final class AppModel: ObservableObject {
         return SessionDraft(defaults: settings, student: preferredStudent)
     }
 
+    func newSessionDraft(on date: Date, preferredStudentID: UUID? = nil) -> SessionDraft {
+        var draft = newSessionDraft(preferredStudentID: preferredStudentID)
+        let calendar = Calendar.current
+        let selectedDay = calendar.startOfDay(for: date)
+
+        let defaultHour: Int
+        let defaultMinute: Int
+
+        if calendar.isDateInToday(selectedDay) {
+            let now = Date()
+            let roundedNow = calendar.nextDate(
+                after: now.addingTimeInterval(-1),
+                matching: DateComponents(minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            ) ?? now
+            defaultHour = calendar.component(.hour, from: roundedNow)
+            defaultMinute = 0
+        } else {
+            defaultHour = 15
+            defaultMinute = 0
+        }
+
+        let startAt = calendar.date(
+            bySettingHour: defaultHour,
+            minute: defaultMinute,
+            second: 0,
+            of: selectedDay
+        ) ?? selectedDay
+
+        draft.startAt = startAt
+        draft.endAt = calendar.date(byAdding: .hour, value: 1, to: startAt) ?? startAt.addingTimeInterval(3_600)
+        return draft
+    }
+
     func newCreditPurchaseDraft(preferredStudentID: UUID? = nil) -> CreditPurchaseDraft {
         let preferredStudent = preferredStudentID.flatMap { student(for: $0) } ?? studentsSorted.first
         return CreditPurchaseDraft(student: preferredStudent)

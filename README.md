@@ -1,17 +1,23 @@
 # TutorTable
 
-TutorTable is a local-first macOS app for private tutors. It keeps student records, lesson history, session payments, upcoming lesson reminders, and optional voice notes for each session.
+TutorTable is a local-first macOS app for private tutors. It helps you manage students, sessions, reminders, calendar scheduling, payments, advance-credit coverage, and voice-driven session updates from one desktop app.
 
-## What it does
+## Current Features
 
-- Tracks students, subjects, rates, and tutor notes
-- Tracks lesson sessions with payment status and reminder timing
-- Stores lesson notes and homework follow-ups for each session
-- Saves voice notes from your Mac microphone into the same local data folder
-- Registers a global hotkey to open TutorTable or bring it to the front
-- Writes everything to a readable JSON file in `~/Documents/TutorTable`
+- Student management with saved defaults for subject and hourly rate
+- Session management with saved defaults for session type, location, and payment method
+- Clickable calendar view with monthly lesson overview
+- Calendar day click-to-add session flow and existing session detail/edit flow
+- Local reminder scheduling for sessions
+- Payment tracking for paid, unpaid, and credit-covered lessons
+- Advance credit tracking for bulk lesson payments and discounted prepaid hours
+- Payment reporting for weekly, monthly, and yearly timeframes
+- Overview dashboard with income and recent lesson memory
+- Voice command input for creating sessions and updating payments
+- Global hotkey support to reopen the app
+- Fully local storage in a readable JSON file
 
-## Local data
+## Local Data
 
 TutorTable creates this folder on first launch:
 
@@ -19,8 +25,34 @@ TutorTable creates this folder on first launch:
 
 Inside that folder:
 
-- `tutor-data.json` contains all students and sessions in pretty-printed JSON
-- `AudioNotes/` stores any lesson voice notes you record
+- `tutor-data.json` contains app settings, students, sessions, and advance-credit purchases
+- supporting system files are stored there as needed for reminders and launcher status
+
+## Voice Commands
+
+TutorTable uses Apple’s built-in speech recognition on macOS. The app can listen for commands such as:
+
+- creating a new session from spoken date, time, student, duration, and payment details
+- updating an existing session payment status from speech
+
+TutorTable no longer stores standalone audio-note recordings. The microphone is used for live speech-to-text command input instead.
+
+## Payments And Credit Coverage
+
+TutorTable supports both direct lesson payments and advance-credit workflows.
+
+- `Paid` means the lesson was paid directly
+- `Unpaid` means the lesson still needs payment
+- `Credit Covered` means the lesson was automatically covered by a student’s prepaid lesson credit
+
+The Payments page also tracks:
+
+- total earned
+- directly paid income
+- credit received
+- credit-covered lesson value
+- unpaid sessions
+- remaining active student credit balances
 
 ## Build
 
@@ -34,7 +66,8 @@ open build/TutorTable.app
 
 ## Notes
 
-- The app first tries the global hotkey `Command + Option + T`.
-- If macOS or another app already owns that shortcut, TutorTable falls back to another `T` shortcut.
-- Notifications are local macOS notifications, so the first launch asks for reminder access.
-- Microphone recording asks for microphone permission the first time you record a voice note.
+- The app first tries the global hotkey `Command + Option + T`
+- If that shortcut is unavailable, TutorTable falls back to another `T` shortcut
+- Notifications are local macOS notifications, so the app requests reminder permission
+- Voice commands request microphone and speech-recognition permission on first use
+- The build script regenerates the app icon before building the app bundle

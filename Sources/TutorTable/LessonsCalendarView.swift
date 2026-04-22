@@ -6,6 +6,7 @@ struct LessonsCalendarView: View {
     @State private var displayedMonth = Calendar.current.startOfMonth(for: Date())
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
     @State private var selectedSession: LessonSession?
+    @State private var newSessionRequest: LessonsCalendarNewSessionRequest?
 
     private let calendar = Calendar.current
 
@@ -144,6 +145,13 @@ struct LessonsCalendarView: View {
             LessonsCalendarSessionDetailSheet(session: session)
                 .environmentObject(appModel)
         }
+        .sheet(item: $newSessionRequest) { request in
+            LessonsCalendarNewSessionSheet(
+                selectedDate: request.date,
+                initialDraft: appModel.newSessionDraft(on: request.date)
+            )
+            .environmentObject(appModel)
+        }
     }
 
     private var calendarBoard: some View {
@@ -166,6 +174,9 @@ struct LessonsCalendarView: View {
                         onOpenSession: { session in
                             selectDay(day.date)
                             selectedSession = session
+                        },
+                        onCreateSession: {
+                            beginNewSession(on: day.date)
                         }
                     )
                 }
@@ -248,6 +259,11 @@ struct LessonsCalendarView: View {
         displayedMonth = calendar.startOfMonth(for: nextMonth)
         selectedDate = calendar.startOfDay(for: displayedMonth)
     }
+
+    private func beginNewSession(on date: Date) {
+        selectDay(date)
+        newSessionRequest = LessonsCalendarNewSessionRequest(date: calendar.startOfDay(for: date))
+    }
 }
 
 private struct LessonsCalendarDay: Identifiable {
@@ -283,6 +299,8 @@ private struct LessonsCalendarDayCell: View {
     let isSelected: Bool
     let onSelectDay: () -> Void
     let onOpenSession: (LessonSession) -> Void
+    let onCreateSession: () -> Void
+    @State private var suppressNextCellTap = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -308,6 +326,7 @@ private struct LessonsCalendarDayCell: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(day.sessions.prefix(3))) { session in
                     Button {
+                        suppressNextCellTap = true
                         onOpenSession(session)
                     } label: {
                         LessonsCalendarEventChip(
@@ -341,7 +360,12 @@ private struct LessonsCalendarDayCell: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture {
+            if suppressNextCellTap {
+                suppressNextCellTap = false
+                return
+            }
             onSelectDay()
+            onCreateSession()
         }
         .appInteractiveButton(scaleAmount: 1.005)
     }
@@ -387,6 +411,12 @@ private struct LessonsCalendarDayCell: View {
     }
 }
 
+private struct LessonsCalendarNewSessionRequest: Identifiable {
+    let date: Date
+
+    var id: Date { date }
+}
+
 private struct LessonsCalendarEventChip: View {
     let session: LessonSession
     let studentName: String
@@ -419,7 +449,7 @@ private struct LessonsCalendarEventChip: View {
         case .paid:
             return .green.opacity(0.12)
         case .creditCovered:
-            return .blue.opacity(0.14)
+            return .green.opacity(0.12)
         case .unpaid:
             return .accentColor.opacity(0.12)
         }
@@ -430,7 +460,7 @@ private struct LessonsCalendarEventChip: View {
         case .paid:
             return .green.opacity(0.24)
         case .creditCovered:
-            return .blue.opacity(0.28)
+            return .green.opacity(0.24)
         case .unpaid:
             return .accentColor.opacity(0.25)
         }
@@ -538,7 +568,7 @@ private struct LessonsCalendarSidebarRow: View {
         case .paid:
             return .green
         case .creditCovered:
-            return .blue
+            return .green
         case .unpaid:
             return .accentColor
         }
@@ -779,6 +809,156 @@ private struct LessonsCalendarSessionEditSheet: View {
             .padding(24)
         }
         .frame(minWidth: 560, minHeight: 700)
+    }
+}
+
+private struct LessonsCalendarNewSessionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appModel: AppModel
+
+    let selectedDate: Date
+    @State private var draft: SessionDraft
+
+    init(selectedDate: Date, initialDraft: SessionDraft) {
+        self.selectedDate = selectedDate
+        _draft = State(initialValue: initialDraft)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Add Session")
+                            .font(.system(size: 28, weight: .semibold))
+                        Text("Create a new lesson for \(LessonsCalendarFormatters.selectedDayTitle.string(from: selectedDate)).")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .appInteractiveButton()
+                }
+
+                GroupBox("Session Details") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if appModel.studentsSorted.isEmpty {
+                            EmptyStateView(message: "Create at least one student before adding a session from the calendar.")
+                        } else {
+                            Picker("Student", selection: Binding(
+                                get: { draft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
+                                set: { draft.studentID = $0 }
+                            )) {
+                                ForEach(appModel.studentsSorted) { student in
+                                    Text(student.fullName).tag(student.id)
+                                }
+                            }
+
+                            TextField("Session type", text: $draft.title)
+                            TextField("Location or meeting link", text: $draft.location)
+
+                            DatePicker("Starts", selection: $draft.startAt)
+                            DatePicker("Ends", selection: $draft.endAt)
+
+                            Stepper(
+                                "Reminder: \(draft.reminderMinutesBefore) minutes before",
+                                value: $draft.reminderMinutesBefore,
+                                in: 0...1_440,
+                                step: 5
+                            )
+
+                            HStack {
+                                Text("Payment amount")
+                                Spacer()
+                                TextField(
+                                    "0.00",
+                                    value: $draft.paymentAmount,
+                                    format: .number.precision(.fractionLength(2))
+                                )
+                                .frame(width: 160)
+                            }
+
+                            Picker(
+                                "Payment status",
+                                selection: Binding(
+                                    get: { draft.paymentStatus == .paid ? .paid : .unpaid },
+                                    set: { draft.paymentStatus = $0 }
+                                )
+                            ) {
+                                ForEach(PaymentStatus.manualCases) { status in
+                                    Text(status.title).tag(status)
+                                }
+                            }
+
+                            TextField("Payment method", text: $draft.paymentMethod)
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Lesson notes")
+                                TextEditor(text: $draft.lessonNotes)
+                                    .frame(minHeight: 140)
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Homework or next steps")
+                                TextEditor(text: $draft.homework)
+                                    .frame(minHeight: 110)
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        Spacer()
+                        actionButtons
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        actionButtons
+                    }
+                }
+            }
+            .padding(24)
+        }
+        .frame(minWidth: 560, minHeight: 700)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button("Use Saved Defaults") {
+            let preservedStudentID = draft.studentID
+            let preservedStartAt = draft.startAt
+            let preservedEndAt = draft.endAt
+            let preservedCreatedAt = draft.createdAt
+            let preservedID = draft.id
+            let preservedPaymentStatus = draft.paymentStatus
+            let preservedLessonNotes = draft.lessonNotes
+            let preservedHomework = draft.homework
+
+            draft = appModel.newSessionDraft(on: selectedDate, preferredStudentID: preservedStudentID)
+            draft.id = preservedID
+            draft.createdAt = preservedCreatedAt
+            draft.startAt = preservedStartAt
+            draft.endAt = preservedEndAt
+            draft.paymentStatus = preservedPaymentStatus
+            draft.lessonNotes = preservedLessonNotes
+            draft.homework = preservedHomework
+        }
+        .disabled(appModel.studentsSorted.isEmpty)
+        .appInteractiveButton()
+
+        Button("Save Session") {
+            guard appModel.saveSession(draft) != nil else {
+                return
+            }
+            dismiss()
+        }
+        .disabled(appModel.studentsSorted.isEmpty || !draft.isValid)
+        .appInteractiveButton()
     }
 }
 

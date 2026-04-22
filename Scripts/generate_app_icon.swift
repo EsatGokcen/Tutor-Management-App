@@ -21,27 +21,17 @@ let iconSizes: [(name: String, dimension: CGFloat)] = [
     ("icon_512x512@2x.png", 1024)
 ]
 
-func pngData(from image: NSImage) -> Data? {
-    guard let tiffData = image.tiffRepresentation,
-          let bitmap = NSBitmapImageRep(data: tiffData) else {
-        return nil
-    }
-
-    return bitmap.representation(using: .png, properties: [:])
-}
-
-func makeIconImage(size: CGFloat) -> NSImage {
-    let image = NSImage(size: NSSize(width: size, height: size))
-    image.lockFocus()
-
-    let rect = NSRect(origin: .zero, size: image.size)
-    let cornerRadius = size * 0.23
-    let backgroundPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+func drawIconArtwork(size: CGFloat) {
+    let canvasRect = NSRect(origin: .zero, size: NSSize(width: size, height: size))
+    let tileInset = size * 0.085
+    let tileRect = canvasRect.insetBy(dx: tileInset, dy: tileInset)
+    let cornerRadius = tileRect.width * 0.245
+    let backgroundPath = NSBezierPath(roundedRect: tileRect, xRadius: cornerRadius, yRadius: cornerRadius)
 
     let shadow = NSShadow()
     shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.35)
     shadow.shadowBlurRadius = size * 0.04
-    shadow.shadowOffset = NSSize(width: 0, height: -size * 0.012)
+    shadow.shadowOffset = NSSize(width: 0, height: -size * 0.016)
     shadow.set()
 
     let gradient = NSGradient(colors: [
@@ -52,8 +42,8 @@ func makeIconImage(size: CGFloat) -> NSImage {
     gradient.draw(in: backgroundPath, angle: -38)
 
     NSGraphicsContext.current?.saveGraphicsState()
-    let highlightRect = rect.insetBy(dx: size * 0.04, dy: size * 0.04)
-    let highlightPath = NSBezierPath(roundedRect: highlightRect, xRadius: cornerRadius * 0.9, yRadius: cornerRadius * 0.9)
+    let highlightRect = tileRect.insetBy(dx: tileRect.width * 0.045, dy: tileRect.height * 0.045)
+    let highlightPath = NSBezierPath(roundedRect: highlightRect, xRadius: cornerRadius * 0.92, yRadius: cornerRadius * 0.92)
     highlightPath.addClip()
     let highlightGradient = NSGradient(colors: [
         NSColor(calibratedWhite: 1, alpha: 0.20),
@@ -63,12 +53,17 @@ func makeIconImage(size: CGFloat) -> NSImage {
     highlightGradient.draw(in: highlightRect, angle: 90)
     NSGraphicsContext.current?.restoreGraphicsState()
 
-    let linePath = NSBezierPath(roundedRect: rect.insetBy(dx: size * 0.01, dy: size * 0.01), xRadius: cornerRadius, yRadius: cornerRadius)
+    let lineInset = max(1, size * 0.012)
+    let linePath = NSBezierPath(
+        roundedRect: tileRect.insetBy(dx: lineInset, dy: lineInset),
+        xRadius: cornerRadius * 0.94,
+        yRadius: cornerRadius * 0.94
+    )
     NSColor(calibratedWhite: 1, alpha: 0.08).setStroke()
     linePath.lineWidth = max(1, size * 0.01)
     linePath.stroke()
 
-    let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: size * 0.58, weight: .bold)
+    let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: tileRect.width * 0.55, weight: .bold)
     let symbol = NSImage(
         systemSymbolName: "graduationcap.circle.fill",
         accessibilityDescription: "TutorTable"
@@ -76,11 +71,12 @@ func makeIconImage(size: CGFloat) -> NSImage {
         .withSymbolConfiguration(symbolConfiguration)
 
     if let symbol {
+        let symbolSize = tileRect.width * 0.62
         let symbolRect = NSRect(
-            x: size * 0.17,
-            y: size * 0.17,
-            width: size * 0.66,
-            height: size * 0.66
+            x: tileRect.midX - (symbolSize / 2),
+            y: tileRect.midY - (symbolSize / 2) - (size * 0.01),
+            width: symbolSize,
+            height: symbolSize
         )
         symbol.draw(
             in: symbolRect,
@@ -91,15 +87,45 @@ func makeIconImage(size: CGFloat) -> NSImage {
             hints: nil
         )
     }
+}
 
-    image.unlockFocus()
-    return image
+func pngData(for size: CGFloat) -> Data? {
+    let pixelSize = Int(size.rounded())
+    guard let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: pixelSize,
+        pixelsHigh: pixelSize,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        return nil
+    }
+
+    bitmap.size = NSSize(width: size, height: size)
+
+    guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+        return nil
+    }
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.imageInterpolation = .high
+    context.shouldAntialias = true
+    drawIconArtwork(size: size)
+    context.flushGraphics()
+    NSGraphicsContext.restoreGraphicsState()
+
+    return bitmap.representation(using: .png, properties: [:])
 }
 
 for icon in iconSizes {
-    let image = makeIconImage(size: icon.dimension)
     let outputURL = iconsetURL.appendingPathComponent(icon.name)
-    guard let data = pngData(from: image) else {
+    guard let data = pngData(for: icon.dimension) else {
         throw NSError(domain: "TutorTableIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to render \(icon.name)"])
     }
 
