@@ -66,7 +66,7 @@ open build/TutorTable.app
 
 ## Notes
 
-- The app first tries the global hotkey `Command + Option + T`
+- The app first tries the global hotkey `Command + Shift + T`
 - If that shortcut is unavailable, TutorTable falls back to another `T` shortcut
 - Notifications are local macOS notifications, so the app requests reminder permission
 - Voice commands request microphone and speech-recognition permission on first use

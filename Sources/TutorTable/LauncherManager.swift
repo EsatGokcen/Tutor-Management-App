@@ -44,7 +44,7 @@ final class LauncherManager {
     }
 
     var fallbackDisplayName: String {
-        "Command + Option + T"
+        "Command + Shift + T"
     }
 
     private var launcherAppURL: URL? {

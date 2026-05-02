@@ -19,9 +19,8 @@ final class LauncherHotKeyManager {
         unregister()
 
         let candidates = [
-            (UInt32(kVK_ANSI_T), UInt32(cmdKey | optionKey), "Command + Option + T"),
-            (UInt32(kVK_ANSI_T), UInt32(cmdKey | controlKey), "Command + Control + T"),
-            (UInt32(kVK_ANSI_T), UInt32(cmdKey | shiftKey), "Command + Shift + T")
+            (UInt32(kVK_ANSI_T), UInt32(cmdKey | shiftKey), "Command + Shift + T"),
+            (UInt32(kVK_ANSI_T), UInt32(cmdKey | controlKey), "Command + Control + T")
         ]
         var lastErrorCode: Int32?
 

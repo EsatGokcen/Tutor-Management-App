@@ -9,7 +9,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var creditPurchases: [StudentCreditPurchase] = []
     @Published private(set) var settings = AppSettings()
     @Published private(set) var reminderStatusText = "Not requested yet"
-    @Published private(set) var activeHotKeyDescription = "Command + Option + T"
+    @Published private(set) var activeHotKeyDescription = "Command + Shift + T"
     @Published var bannerMessage: String?
 
     let storagePaths = StoragePaths()
