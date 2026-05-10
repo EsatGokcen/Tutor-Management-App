@@ -55,6 +55,7 @@ cp /Library/Developer/CommandLineTools/usr/include/swift/module.modulemap "$TOOL
   -framework Combine \
   -framework Carbon \
   -framework AVFoundation \
+  -framework EventKit \
   -framework Speech \
   -framework UserNotifications
 

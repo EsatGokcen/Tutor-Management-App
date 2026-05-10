@@ -1,4 +1,5 @@
 import AppKit
+import EventKit
 import Foundation
 import UserNotifications
 
@@ -7,9 +8,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var students: [Student] = []
     @Published private(set) var sessions: [LessonSession] = []
     @Published private(set) var creditPurchases: [StudentCreditPurchase] = []
+    @Published private(set) var timeOffEntries: [TimeOffEntry] = []
     @Published private(set) var settings = AppSettings()
     @Published private(set) var reminderStatusText = "Not requested yet"
     @Published private(set) var activeHotKeyDescription = "Command + Shift + T"
+    @Published private(set) var appleCalendarStatusText = "Not connected"
+    @Published private(set) var appleCalendarDetailText = "TutorTable can sync sessions to a calendar that is already available in Apple Calendar on this Mac."
+    @Published private(set) var availableAppleCalendars: [AppleCalendarOption] = []
     @Published var bannerMessage: String?
 
     let storagePaths = StoragePaths()
@@ -17,6 +22,7 @@ final class AppModel: ObservableObject {
 
     private let reminderManager = ReminderManager()
     private let launcherManager: LauncherManager
+    private let appleCalendarSyncManager = AppleCalendarSyncManager()
 
     var onPresentWindow: (() -> Void)?
 
@@ -30,6 +36,7 @@ final class AppModel: ObservableObject {
         launcherManager = LauncherManager()
 
         load()
+        refreshAppleCalendarIntegrationState()
     }
 
     var studentsSorted: [Student] {
@@ -62,12 +69,25 @@ final class AppModel: ObservableObject {
     }
 
     var hasAnyRecords: Bool {
-        !students.isEmpty || !sessions.isEmpty
+        !students.isEmpty || !sessions.isEmpty || !timeOffEntries.isEmpty
+    }
+
+    var isAppleCalendarSyncEnabled: Bool {
+        settings.appleCalendarSyncEnabled
+    }
+
+    var selectedAppleCalendarIdentifier: String {
+        settings.appleCalendarIdentifier
     }
 
     func configureSystemIntegrations() {
         launcherManager.startLauncherIfNeeded()
         refreshHotKeyStatus()
+        refreshAppleCalendarIntegrationState()
+
+        if settings.appleCalendarSyncEnabled && appleCalendarSyncManager.hasFullAccess() {
+            syncAllSessionsToAppleCalendar(showSuccessBanner: false)
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.refreshHotKeyStatus()
@@ -130,6 +150,10 @@ final class AppModel: ObservableObject {
         return CreditPurchaseDraft(student: preferredStudent)
     }
 
+    func newTimeOffDraft(on date: Date = Date()) -> TimeOffDraft {
+        TimeOffDraft(on: date)
+    }
+
     func copiedSessionDraft(from sessionID: UUID) -> SessionDraft? {
         guard let session = sessions.first(where: { $0.id == sessionID }) else {
             return nil
@@ -162,6 +186,119 @@ final class AppModel: ObservableObject {
 
     func student(for studentID: UUID) -> Student? {
         students.first(where: { $0.id == studentID })
+    }
+
+    func timeOffEntriesForDay(_ date: Date) -> [TimeOffEntry] {
+        guard let dayInterval = Calendar.current.dateInterval(of: .day, for: date) else {
+            return []
+        }
+
+        return timeOffEntries
+            .filter { entry in
+                intervalsOverlap(startAt: dayInterval.start, endAt: dayInterval.end, with: entry.startAt, entry.endAt)
+            }
+            .sorted {
+                if $0.startAt == $1.startAt {
+                    return $0.endAt < $1.endAt
+                }
+                return $0.startAt < $1.startAt
+            }
+    }
+
+    func requestAppleCalendarAccess() async {
+        do {
+            let granted = try await appleCalendarSyncManager.requestFullAccess()
+            refreshAppleCalendarIntegrationState()
+
+            guard granted else {
+                bannerMessage = "TutorTable was not granted full Apple Calendar access."
+                return
+            }
+
+            settings.appleCalendarSyncEnabled = true
+            if settings.appleCalendarIdentifier.isEmpty {
+                settings.appleCalendarIdentifier = preferredAppleCalendarIdentifier()
+            }
+            persist()
+            refreshAppleCalendarIntegrationState()
+            syncAllSessionsToAppleCalendar(showSuccessBanner: true)
+        } catch {
+            refreshAppleCalendarIntegrationState()
+            bannerMessage = error.localizedDescription
+        }
+    }
+
+    func refreshAppleCalendarIntegration() {
+        refreshAppleCalendarIntegrationState()
+    }
+
+    func disableAppleCalendarSync() {
+        settings.appleCalendarSyncEnabled = false
+        persist()
+        refreshAppleCalendarIntegrationState()
+        bannerMessage = "Apple Calendar sync is turned off. Existing Apple Calendar events were left in place."
+    }
+
+    func setAppleCalendar(identifier: String) {
+        settings.appleCalendarIdentifier = identifier
+        persist()
+        refreshAppleCalendarIntegrationState()
+
+        if settings.appleCalendarSyncEnabled {
+            syncAllSessionsToAppleCalendar(showSuccessBanner: true)
+        } else {
+            bannerMessage = "Selected a new Apple Calendar for future TutorTable syncing."
+        }
+    }
+
+    func syncAllSessionsToAppleCalendar(showSuccessBanner: Bool = true) {
+        guard settings.appleCalendarSyncEnabled else {
+            if showSuccessBanner {
+                bannerMessage = "Turn on Apple Calendar sync first."
+            }
+            return
+        }
+
+        refreshAppleCalendarIntegrationState()
+        guard appleCalendarSyncManager.hasFullAccess() else {
+            bannerMessage = "TutorTable needs full Apple Calendar access before it can sync sessions."
+            return
+        }
+        guard !availableAppleCalendars.isEmpty else {
+            bannerMessage = "TutorTable could not find a writable Apple Calendar to sync into."
+            return
+        }
+
+        var syncedCount = 0
+        var firstFailureMessage: String?
+
+        for index in sessions.indices {
+            guard let student = student(for: sessions[index].studentID) else {
+                firstFailureMessage = firstFailureMessage ?? AppleCalendarSyncError.sessionStudentMissing.localizedDescription
+                continue
+            }
+
+            do {
+                sessions[index] = try appleCalendarSyncManager.sync(
+                    session: sessions[index],
+                    student: student,
+                    preferredCalendarIdentifier: settings.appleCalendarIdentifier
+                )
+                syncedCount += 1
+            } catch {
+                firstFailureMessage = firstFailureMessage ?? error.localizedDescription
+            }
+        }
+
+        persist()
+        refreshAppleCalendarIntegrationState()
+
+        if showSuccessBanner {
+            bannerMessage = syncAllSessionsBannerMessage(
+                syncedCount: syncedCount,
+                failureMessage: firstFailureMessage
+            )
+        }
     }
 
     func creditStatus(for studentID: UUID) -> StudentCreditStatus? {
@@ -295,11 +432,16 @@ final class AppModel: ObservableObject {
 
     func deleteStudent(id: UUID) {
         let removedName = students.first(where: { $0.id == id })?.fullName ?? "student"
+        let linkedSessions = sessions.filter { $0.studentID == id }
+        let calendarSyncWarning = removeAppleCalendarEvents(for: linkedSessions)
         students.removeAll { $0.id == id }
         sessions.removeAll { $0.studentID == id }
         creditPurchases.removeAll { $0.studentID == id }
         recalculateCreditCoverage()
-        bannerMessage = "Deleted \(removedName) and any linked sessions."
+        bannerMessage = mergeBannerMessage(
+            primary: "Deleted \(removedName) and any linked sessions.",
+            syncWarning: calendarSyncWarning
+        )
         persist()
         Task {
             await refreshReminders(requestingAccessIfNeeded: false)
@@ -314,20 +456,32 @@ final class AppModel: ObservableObject {
         }
 
         let session = draft.makeSession()
+        if let unavailableEntry = unavailableTimeOffEntry(for: session) {
+            bannerMessage = unavailableMessage(for: unavailableEntry)
+            return nil
+        }
+
+        let baseBannerMessage: String
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index] = session
-            bannerMessage = "Updated the session for \(studentName(for: session.studentID))."
+            baseBannerMessage = "Updated the session for \(studentName(for: session.studentID))."
         } else {
             sessions.append(session)
-            bannerMessage = "Added a session for \(studentName(for: session.studentID))."
+            baseBannerMessage = "Added a session for \(studentName(for: session.studentID))."
         }
 
         recalculateCreditCoverage()
+        let syncResult = syncSessionToAppleCalendarIfNeeded(sessionID: session.id)
+        let syncedSession = syncResult.session ?? sessions.first(where: { $0.id == session.id })
         persist()
+        bannerMessage = mergeBannerMessage(
+            primary: baseBannerMessage,
+            syncWarning: syncResult.warningMessage
+        )
         Task {
             await refreshReminders(requestingAccessIfNeeded: false)
         }
-        return session
+        return syncedSession
     }
 
     func deleteSession(id: UUID) {
@@ -335,13 +489,55 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let calendarSyncWarning = removeAppleCalendarEvent(for: existing)
         sessions.removeAll { $0.id == id }
         recalculateCreditCoverage()
-        bannerMessage = "Deleted the session for \(studentName(for: existing.studentID))."
+        bannerMessage = mergeBannerMessage(
+            primary: "Deleted the session for \(studentName(for: existing.studentID)).",
+            syncWarning: calendarSyncWarning
+        )
         persist()
         Task {
             await refreshReminders(requestingAccessIfNeeded: false)
         }
+    }
+
+    @discardableResult
+    func saveTimeOffEntry(_ draft: TimeOffDraft) -> TimeOffEntry? {
+        guard draft.isValid else {
+            bannerMessage = "Choose a valid unavailable period before saving time off."
+            return nil
+        }
+
+        let entry = draft.makeEntry()
+        if let index = timeOffEntries.firstIndex(where: { $0.id == entry.id }) {
+            timeOffEntries[index] = entry
+        } else {
+            timeOffEntries.append(entry)
+        }
+
+        let overlappingSessions = sessions
+            .filter { intervalsOverlap(startAt: $0.startAt, endAt: $0.endAt, with: entry.startAt, entry.endAt) }
+            .sorted { $0.startAt < $1.startAt }
+
+        if overlappingSessions.isEmpty {
+            bannerMessage = "Saved unavailable time."
+        } else {
+            bannerMessage = "Saved unavailable time. \(overlappingSessions.count) existing session\(overlappingSessions.count == 1 ? "" : "s") still overlap it."
+        }
+
+        persist()
+        return entry
+    }
+
+    func deleteTimeOffEntry(id: UUID) {
+        guard let existing = timeOffEntries.first(where: { $0.id == id }) else {
+            return
+        }
+
+        timeOffEntries.removeAll { $0.id == id }
+        bannerMessage = "Deleted unavailable time for \(existing.displayTitle)."
+        persist()
     }
 
     @discardableResult
@@ -548,6 +744,7 @@ final class AppModel: ObservableObject {
         students = sampleStudents
         sessions = sampleSessions
         creditPurchases = sampleCreditPurchases
+        timeOffEntries = []
         recalculateCreditCoverage()
         bannerMessage = "Added sample students, sessions, and advance credit so you can test the full interface."
         persist()
@@ -567,18 +764,21 @@ final class AppModel: ObservableObject {
             students = snapshot.students
             sessions = snapshot.sessions
             creditPurchases = snapshot.creditPurchases
+            timeOffEntries = snapshot.timeOffEntries
             recalculateCreditCoverage()
         } catch CocoaError.fileReadNoSuchFile {
             settings = AppSettings()
             students = []
             sessions = []
             creditPurchases = []
+            timeOffEntries = []
         } catch {
             bannerMessage = "TutorTable could not read the saved data file, so it started with a clean state."
             settings = AppSettings()
             students = []
             sessions = []
             creditPurchases = []
+            timeOffEntries = []
         }
     }
 
@@ -588,7 +788,8 @@ final class AppModel: ObservableObject {
                 settings: settings,
                 students: students,
                 sessions: sessions,
-                creditPurchases: creditPurchases
+                creditPurchases: creditPurchases,
+                timeOffEntries: timeOffEntries
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -676,14 +877,135 @@ final class AppModel: ObservableObject {
         }
         sessions[index].updatedAt = Date()
         recalculateCreditCoverage()
-        let session = sessions[index]
-
+        let syncResult = syncSessionToAppleCalendarIfNeeded(sessionID: intent.sessionID)
+        let session = syncResult.session ?? sessions[index]
         persist()
         Task {
             await refreshReminders(requestingAccessIfNeeded: false)
         }
 
-        bannerMessage = "Updated \(studentName(for: session.studentID))'s session on \(AppFormat.shortDateFormatter.string(from: session.startAt)) and marked it \(statusSummary(for: intent.paymentStatus))."
+        bannerMessage = mergeBannerMessage(
+            primary: "Updated \(studentName(for: session.studentID))'s session on \(AppFormat.shortDateFormatter.string(from: session.startAt)) and marked it \(statusSummary(for: intent.paymentStatus)).",
+            syncWarning: syncResult.warningMessage
+        )
+    }
+
+    private func refreshAppleCalendarIntegrationState() {
+        let snapshot = appleCalendarSyncManager.connectionSnapshot()
+        availableAppleCalendars = snapshot.availableCalendars
+
+        if settings.appleCalendarSyncEnabled,
+           settings.appleCalendarIdentifier.isEmpty,
+           let fallbackIdentifier = preferredAppleCalendarIdentifier(from: snapshot) {
+            settings.appleCalendarIdentifier = fallbackIdentifier
+            persist()
+        }
+
+        if settings.appleCalendarSyncEnabled,
+           !settings.appleCalendarIdentifier.isEmpty,
+           availableAppleCalendars.contains(where: { $0.id == settings.appleCalendarIdentifier }) == false,
+           let fallbackIdentifier = preferredAppleCalendarIdentifier(from: snapshot) {
+            settings.appleCalendarIdentifier = fallbackIdentifier
+            persist()
+        }
+
+        appleCalendarStatusText = Self.appleCalendarStatusText(
+            authorizationStatus: snapshot.authorizationStatus,
+            syncEnabled: settings.appleCalendarSyncEnabled,
+            selectedCalendar: availableAppleCalendars.first(where: { $0.id == settings.appleCalendarIdentifier })
+        )
+        appleCalendarDetailText = Self.appleCalendarDetailText(
+            authorizationStatus: snapshot.authorizationStatus,
+            syncEnabled: settings.appleCalendarSyncEnabled,
+            availableCalendarCount: availableAppleCalendars.count,
+            selectedCalendar: availableAppleCalendars.first(where: { $0.id == settings.appleCalendarIdentifier })
+        )
+    }
+
+    private func preferredAppleCalendarIdentifier() -> String {
+        preferredAppleCalendarIdentifier(from: appleCalendarSyncManager.connectionSnapshot()) ?? settings.appleCalendarIdentifier
+    }
+
+    private func preferredAppleCalendarIdentifier(from snapshot: AppleCalendarConnectionSnapshot) -> String? {
+        if !settings.appleCalendarIdentifier.isEmpty,
+           snapshot.availableCalendars.contains(where: { $0.id == settings.appleCalendarIdentifier }) {
+            return settings.appleCalendarIdentifier
+        }
+
+        return snapshot.defaultCalendarIdentifier ?? snapshot.availableCalendars.first?.id
+    }
+
+    private func syncSessionToAppleCalendarIfNeeded(sessionID: UUID) -> (session: LessonSession?, warningMessage: String?) {
+        guard settings.appleCalendarSyncEnabled else {
+            return (sessions.first(where: { $0.id == sessionID }), nil)
+        }
+
+        refreshAppleCalendarIntegrationState()
+
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else {
+            return (nil, nil)
+        }
+
+        guard let student = student(for: sessions[index].studentID) else {
+            return (sessions[index], AppleCalendarSyncError.sessionStudentMissing.localizedDescription)
+        }
+
+        do {
+            sessions[index] = try appleCalendarSyncManager.sync(
+                session: sessions[index],
+                student: student,
+                preferredCalendarIdentifier: settings.appleCalendarIdentifier
+            )
+            return (sessions[index], nil)
+        } catch {
+            return (sessions[index], error.localizedDescription)
+        }
+    }
+
+    private func removeAppleCalendarEvent(for session: LessonSession) -> String? {
+        guard settings.appleCalendarSyncEnabled else {
+            return nil
+        }
+
+        do {
+            try appleCalendarSyncManager.removeSyncedEvent(
+                for: session,
+                student: student(for: session.studentID),
+                preferredCalendarIdentifier: settings.appleCalendarIdentifier
+            )
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func removeAppleCalendarEvents(for sessions: [LessonSession]) -> String? {
+        guard settings.appleCalendarSyncEnabled else {
+            return nil
+        }
+
+        for session in sessions {
+            if let warning = removeAppleCalendarEvent(for: session) {
+                return warning
+            }
+        }
+
+        return nil
+    }
+
+    private func mergeBannerMessage(primary: String, syncWarning: String?) -> String {
+        guard let syncWarning, !syncWarning.isEmpty else {
+            return primary
+        }
+
+        return "\(primary) Apple Calendar sync warning: \(syncWarning)"
+    }
+
+    private func syncAllSessionsBannerMessage(syncedCount: Int, failureMessage: String?) -> String {
+        let baseMessage = syncedCount == 1
+            ? "Synced 1 session to Apple Calendar."
+            : "Synced \(syncedCount) sessions to Apple Calendar."
+        return mergeBannerMessage(primary: baseMessage, syncWarning: failureMessage)
     }
 
     private func statusSummary(for status: PaymentStatus) -> String {
@@ -695,6 +1017,87 @@ final class AppModel: ObservableObject {
         case .unpaid:
             return "unpaid"
         }
+    }
+
+    private func unavailableTimeOffEntry(for session: LessonSession) -> TimeOffEntry? {
+        timeOffEntries
+            .filter { intervalsOverlap(startAt: session.startAt, endAt: session.endAt, with: $0.startAt, $0.endAt) }
+            .sorted { $0.startAt < $1.startAt }
+            .first
+    }
+
+    private func unavailableMessage(for entry: TimeOffEntry) -> String {
+        if entry.isAllDay {
+            return "\(entry.displayTitle) makes that date unavailable."
+        }
+
+        return "\(entry.displayTitle) makes that time unavailable (\(AppFormat.dateTimeFormatter.string(from: entry.startAt)) to \(AppFormat.dateTimeFormatter.string(from: entry.endAt)))."
+    }
+
+    private func intervalsOverlap(startAt: Date, endAt: Date, with otherStartAt: Date, _ otherEndAt: Date) -> Bool {
+        startAt < otherEndAt && endAt > otherStartAt
+    }
+
+    private static func appleCalendarStatusText(
+        authorizationStatus: EKAuthorizationStatus,
+        syncEnabled: Bool,
+        selectedCalendar: AppleCalendarOption?
+    ) -> String {
+        if authorizationStatus == .notDetermined {
+            return "Not connected"
+        }
+        if authorizationStatus == .restricted {
+            return "Restricted by macOS"
+        }
+        if authorizationStatus == .denied {
+            return "Access denied"
+        }
+        if #available(macOS 14.0, *), authorizationStatus == .writeOnly {
+            return "Write-only access is not enough"
+        }
+
+        guard syncEnabled else {
+            return "Access granted, sync is off"
+        }
+
+        if let selectedCalendar {
+            if !selectedCalendar.likelySyncsAcrossDevices {
+                return "Connected to \(selectedCalendar.displayName) on this Mac only"
+            }
+            return "Connected to \(selectedCalendar.displayName)"
+        }
+        return "Connected"
+    }
+
+    private static func appleCalendarDetailText(
+        authorizationStatus: EKAuthorizationStatus,
+        syncEnabled: Bool,
+        availableCalendarCount: Int,
+        selectedCalendar: AppleCalendarOption?
+    ) -> String {
+        if authorizationStatus == .notDetermined {
+            return "Connect TutorTable once and it will use calendars that are already signed into Apple Calendar on this Mac."
+        }
+        if authorizationStatus == .restricted {
+            return "Apple Calendar access is restricted on this Mac, so TutorTable cannot sync sessions right now."
+        }
+        if authorizationStatus == .denied {
+            return "Allow Apple Calendar access in macOS privacy settings, then return here and refresh the connection."
+        }
+        if #available(macOS 14.0, *), authorizationStatus == .writeOnly {
+            return "TutorTable needs full access so it can update and delete existing session events, not just create new ones."
+        }
+
+        if availableCalendarCount == 0 {
+            return "Calendar access is available, but no writable calendars were found in Apple Calendar."
+        }
+        if let selectedCalendar, !selectedCalendar.likelySyncsAcrossDevices {
+            return "The selected calendar appears to be stored only on this Mac, so its events usually will not show up on iPhone. Choose an iCloud, Google, or Exchange calendar in this card, then sync existing sessions again."
+        }
+        if syncEnabled {
+            return "New sessions, edits, and deletes will sync automatically. Existing synced events keep Lesson Notes and Homework as separate sections in the Apple Calendar notes field."
+        }
+        return "Access is ready. Turn sync on to start sending TutorTable sessions into the calendar you choose below."
     }
 
     private func recalculateCreditCoverage() {

@@ -63,6 +63,8 @@ struct AppSettings: Codable, Equatable {
     static let defaultSessionPaymentMethodValue = ""
     static let fiveHourCreditDiscountValue = 0.0
     static let tenHourCreditDiscountValue = 0.0
+    static let appleCalendarSyncEnabledValue = false
+    static let appleCalendarIdentifierValue = ""
 
     var defaultStudentSubject: String = defaultStudentSubjectValue
     var defaultStudentHourlyRate: Double = defaultStudentHourlyRateValue
@@ -71,6 +73,8 @@ struct AppSettings: Codable, Equatable {
     var defaultSessionPaymentMethod: String = defaultSessionPaymentMethodValue
     var fiveHourCreditDiscount: Double = fiveHourCreditDiscountValue
     var tenHourCreditDiscount: Double = tenHourCreditDiscountValue
+    var appleCalendarSyncEnabled: Bool = appleCalendarSyncEnabledValue
+    var appleCalendarIdentifier: String = appleCalendarIdentifierValue
 
     private enum CodingKeys: String, CodingKey {
         case defaultStudentSubject
@@ -80,6 +84,8 @@ struct AppSettings: Codable, Equatable {
         case defaultSessionPaymentMethod
         case fiveHourCreditDiscount
         case tenHourCreditDiscount
+        case appleCalendarSyncEnabled
+        case appleCalendarIdentifier
     }
 
     init() {}
@@ -93,6 +99,8 @@ struct AppSettings: Codable, Equatable {
         defaultSessionPaymentMethod = try container.decodeIfPresent(String.self, forKey: .defaultSessionPaymentMethod) ?? Self.defaultSessionPaymentMethodValue
         fiveHourCreditDiscount = try container.decodeIfPresent(Double.self, forKey: .fiveHourCreditDiscount) ?? Self.fiveHourCreditDiscountValue
         tenHourCreditDiscount = try container.decodeIfPresent(Double.self, forKey: .tenHourCreditDiscount) ?? Self.tenHourCreditDiscountValue
+        appleCalendarSyncEnabled = try container.decodeIfPresent(Bool.self, forKey: .appleCalendarSyncEnabled) ?? Self.appleCalendarSyncEnabledValue
+        appleCalendarIdentifier = try container.decodeIfPresent(String.self, forKey: .appleCalendarIdentifier) ?? Self.appleCalendarIdentifierValue
     }
 
     func encode(to encoder: Encoder) throws {
@@ -104,6 +112,8 @@ struct AppSettings: Codable, Equatable {
         try container.encode(defaultSessionPaymentMethod, forKey: .defaultSessionPaymentMethod)
         try container.encode(fiveHourCreditDiscount, forKey: .fiveHourCreditDiscount)
         try container.encode(tenHourCreditDiscount, forKey: .tenHourCreditDiscount)
+        try container.encode(appleCalendarSyncEnabled, forKey: .appleCalendarSyncEnabled)
+        try container.encode(appleCalendarIdentifier, forKey: .appleCalendarIdentifier)
     }
 }
 
@@ -216,11 +226,118 @@ struct LessonSession: Identifiable, Codable, Equatable {
     var paymentMethod: String
     var lessonNotes: String
     var homework: String
+    var appleCalendarItemIdentifier: String?
     var createdAt: Date
     var updatedAt: Date
 
     var durationHours: Double {
         max(0, endAt.timeIntervalSince(startAt)) / 3_600
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case studentID
+        case title
+        case location
+        case startAt
+        case endAt
+        case reminderMinutesBefore
+        case paymentAmount
+        case paymentStatus
+        case paymentMethod
+        case lessonNotes
+        case homework
+        case appleCalendarItemIdentifier
+        case createdAt
+        case updatedAt
+    }
+
+    init(
+        id: UUID,
+        studentID: UUID,
+        title: String,
+        location: String,
+        startAt: Date,
+        endAt: Date,
+        reminderMinutesBefore: Int,
+        paymentAmount: Double,
+        paymentStatus: PaymentStatus,
+        paymentMethod: String,
+        lessonNotes: String,
+        homework: String,
+        appleCalendarItemIdentifier: String? = nil,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.studentID = studentID
+        self.title = title
+        self.location = location
+        self.startAt = startAt
+        self.endAt = endAt
+        self.reminderMinutesBefore = reminderMinutesBefore
+        self.paymentAmount = paymentAmount
+        self.paymentStatus = paymentStatus
+        self.paymentMethod = paymentMethod
+        self.lessonNotes = lessonNotes
+        self.homework = homework
+        self.appleCalendarItemIdentifier = appleCalendarItemIdentifier
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        studentID = try container.decode(UUID.self, forKey: .studentID)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        location = try container.decodeIfPresent(String.self, forKey: .location) ?? ""
+        startAt = try container.decodeIfPresent(Date.self, forKey: .startAt) ?? Date()
+        endAt = try container.decodeIfPresent(Date.self, forKey: .endAt) ?? startAt
+        reminderMinutesBefore = try container.decodeIfPresent(Int.self, forKey: .reminderMinutesBefore) ?? 30
+        paymentAmount = try container.decodeIfPresent(Double.self, forKey: .paymentAmount) ?? 0
+        paymentStatus = try container.decodeIfPresent(PaymentStatus.self, forKey: .paymentStatus) ?? .unpaid
+        paymentMethod = try container.decodeIfPresent(String.self, forKey: .paymentMethod) ?? ""
+        lessonNotes = try container.decodeIfPresent(String.self, forKey: .lessonNotes) ?? ""
+        homework = try container.decodeIfPresent(String.self, forKey: .homework) ?? ""
+        appleCalendarItemIdentifier = try container.decodeIfPresent(String.self, forKey: .appleCalendarItemIdentifier)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(studentID, forKey: .studentID)
+        try container.encode(title, forKey: .title)
+        try container.encode(location, forKey: .location)
+        try container.encode(startAt, forKey: .startAt)
+        try container.encode(endAt, forKey: .endAt)
+        try container.encode(reminderMinutesBefore, forKey: .reminderMinutesBefore)
+        try container.encode(paymentAmount, forKey: .paymentAmount)
+        try container.encode(paymentStatus, forKey: .paymentStatus)
+        try container.encode(paymentMethod, forKey: .paymentMethod)
+        try container.encode(lessonNotes, forKey: .lessonNotes)
+        try container.encode(homework, forKey: .homework)
+        try container.encodeIfPresent(appleCalendarItemIdentifier, forKey: .appleCalendarItemIdentifier)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+struct TimeOffEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var startAt: Date
+    var endAt: Date
+    var isAllDay: Bool
+    var notes: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    var displayTitle: String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? "Time Off" : trimmedTitle
     }
 }
 
@@ -229,17 +346,20 @@ struct AppSnapshot: Codable {
     var students: [Student] = []
     var sessions: [LessonSession] = []
     var creditPurchases: [StudentCreditPurchase] = []
+    var timeOffEntries: [TimeOffEntry] = []
 
     init(
         settings: AppSettings = AppSettings(),
         students: [Student] = [],
         sessions: [LessonSession] = [],
-        creditPurchases: [StudentCreditPurchase] = []
+        creditPurchases: [StudentCreditPurchase] = [],
+        timeOffEntries: [TimeOffEntry] = []
     ) {
         self.settings = settings
         self.students = students
         self.sessions = sessions
         self.creditPurchases = creditPurchases
+        self.timeOffEntries = timeOffEntries
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -247,6 +367,7 @@ struct AppSnapshot: Codable {
         case students
         case sessions
         case creditPurchases
+        case timeOffEntries
     }
 
     init(from decoder: Decoder) throws {
@@ -255,6 +376,7 @@ struct AppSnapshot: Codable {
         students = try container.decodeIfPresent([Student].self, forKey: .students) ?? []
         sessions = try container.decodeIfPresent([LessonSession].self, forKey: .sessions) ?? []
         creditPurchases = try container.decodeIfPresent([StudentCreditPurchase].self, forKey: .creditPurchases) ?? []
+        timeOffEntries = try container.decodeIfPresent([TimeOffEntry].self, forKey: .timeOffEntries) ?? []
     }
 }
 
@@ -327,6 +449,7 @@ struct SessionDraft {
     var paymentMethod: String = ""
     var lessonNotes: String = ""
     var homework: String = ""
+    var appleCalendarItemIdentifier: String?
     var createdAt: Date?
 
     init() {}
@@ -352,6 +475,7 @@ struct SessionDraft {
         paymentMethod = session.paymentMethod
         lessonNotes = session.lessonNotes
         homework = session.homework
+        appleCalendarItemIdentifier = session.appleCalendarItemIdentifier
         createdAt = session.createdAt
     }
 
@@ -385,6 +509,70 @@ struct SessionDraft {
             paymentMethod: paymentMethod.trimmingCharacters(in: .whitespacesAndNewlines),
             lessonNotes: lessonNotes.trimmingCharacters(in: .whitespacesAndNewlines),
             homework: homework.trimmingCharacters(in: .whitespacesAndNewlines),
+            appleCalendarItemIdentifier: appleCalendarItemIdentifier,
+            createdAt: createdAt ?? Date(),
+            updatedAt: Date()
+        )
+    }
+}
+
+struct TimeOffDraft {
+    var id: UUID?
+    var title: String = "Time Off"
+    var startAt: Date = Calendar.current.startOfDay(for: Date())
+    var endAt: Date = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+    var isAllDay: Bool = true
+    var notes: String = ""
+    var createdAt: Date?
+
+    init() {}
+
+    init(on date: Date) {
+        let dayStart = Calendar.current.startOfDay(for: date)
+        startAt = dayStart
+        endAt = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86_400)
+    }
+
+    init(entry: TimeOffEntry) {
+        id = entry.id
+        title = entry.displayTitle
+        startAt = entry.startAt
+        endAt = entry.endAt
+        isAllDay = entry.isAllDay
+        notes = entry.notes
+        createdAt = entry.createdAt
+    }
+
+    var isValid: Bool {
+        normalizedEndAt > normalizedStartAt
+    }
+
+    var normalizedStartAt: Date {
+        if isAllDay {
+            return Calendar.current.startOfDay(for: startAt)
+        }
+        return startAt
+    }
+
+    var normalizedEndAt: Date {
+        if isAllDay {
+            let dayStart = Calendar.current.startOfDay(for: endAt)
+            if dayStart > Calendar.current.startOfDay(for: startAt) {
+                return dayStart
+            }
+            return Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: startAt)) ?? startAt.addingTimeInterval(86_400)
+        }
+        return endAt
+    }
+
+    func makeEntry() -> TimeOffEntry {
+        TimeOffEntry(
+            id: id ?? UUID(),
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Time Off" : title.trimmingCharacters(in: .whitespacesAndNewlines),
+            startAt: normalizedStartAt,
+            endAt: normalizedEndAt,
+            isAllDay: isAllDay,
+            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
             createdAt: createdAt ?? Date(),
             updatedAt: Date()
         )

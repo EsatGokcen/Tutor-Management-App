@@ -26,6 +26,10 @@
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCalendarsUsageDescription</key>
+	<string>TutorTable uses Calendar access to create, update, and delete lesson events in Apple Calendar for your tutoring schedule.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>TutorTable needs full Calendar access so it can keep your lesson events in Apple Calendar updated when sessions change or are deleted.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>TutorTable uses the microphone so you can speak session commands and updates.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -1050,6 +1050,57 @@ struct SettingsView: View {
                 Text("Settings")
                     .font(.system(size: 28, weight: .semibold))
 
+                GroupBox("Apple Calendar Integration") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("TutorTable can sync sessions into a calendar that is already signed into Apple Calendar on this Mac. Once connected, new sessions, updates, and deletes stay in step automatically.")
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Status")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Text(appModel.appleCalendarStatusText)
+                                .font(.title3.weight(.semibold))
+                            Text(appModel.appleCalendarDetailText)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if !appModel.availableAppleCalendars.isEmpty {
+                            Picker(
+                                "Sync calendar",
+                                selection: Binding(
+                                    get: {
+                                        let currentIdentifier = appModel.selectedAppleCalendarIdentifier
+                                        if currentIdentifier.isEmpty {
+                                            return appModel.availableAppleCalendars.first?.id ?? ""
+                                        }
+                                        return currentIdentifier
+                                    },
+                                    set: { newValue in
+                                        appModel.setAppleCalendar(identifier: newValue)
+                                    }
+                                )
+                            ) {
+                                ForEach(appModel.availableAppleCalendars) { calendar in
+                                    Text(calendar.displayName).tag(calendar.id)
+                                }
+                            }
+                        }
+
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                appleCalendarButtons
+                            }
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                appleCalendarButtons
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                }
+
                 GroupBox("Student Defaults") {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("These values prefill new student records, so you do not have to type them each time.")
@@ -1121,6 +1172,7 @@ struct SettingsView: View {
         }
         .onAppear {
             syncFromSettings()
+            appModel.refreshAppleCalendarIntegration()
         }
         .onChange(of: appModel.settings) { _ in
             syncFromSettings()
@@ -1133,6 +1185,31 @@ struct SettingsView: View {
         defaultSessionType = appModel.settings.defaultSessionType
         defaultSessionLocation = appModel.settings.defaultSessionLocation
         defaultSessionPaymentMethod = appModel.settings.defaultSessionPaymentMethod
+    }
+
+    @ViewBuilder
+    private var appleCalendarButtons: some View {
+        Button(appModel.isAppleCalendarSyncEnabled ? "Sync Existing Sessions Now" : "Connect Apple Calendar") {
+            if appModel.isAppleCalendarSyncEnabled {
+                appModel.syncAllSessionsToAppleCalendar(showSuccessBanner: true)
+            } else {
+                Task {
+                    await appModel.requestAppleCalendarAccess()
+                }
+            }
+        }
+        .appInteractiveButton()
+
+        Button("Refresh Calendars") {
+            appModel.refreshAppleCalendarIntegration()
+        }
+        .appInteractiveButton()
+
+        Button("Turn Off Sync") {
+            appModel.disableAppleCalendarSync()
+        }
+        .disabled(!appModel.isAppleCalendarSyncEnabled)
+        .appInteractiveButton()
     }
 
     @ViewBuilder
