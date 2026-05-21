@@ -828,6 +828,17 @@ struct PaymentsView: View {
 
             creditDraft = CreditPurchaseDraft(purchase: purchase)
         }
+        .onChange(of: creditDraft.purchasedAt) { newValue in
+            guard let expirationDate = creditDraft.expirationDate else {
+                return
+            }
+
+            let purchaseDay = Calendar.current.startOfDay(for: newValue)
+            let expirationDay = Calendar.current.startOfDay(for: expirationDate)
+            if expirationDay < purchaseDay {
+                creditDraft.expirationDate = purchaseDay
+            }
+        }
     }
 
     @ViewBuilder
@@ -839,34 +850,60 @@ struct PaymentsView: View {
         stackInternals: Bool
     ) -> some View {
         GroupBox("Add Or Edit Advance Credit") {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top, spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [AppTheme.accent.opacity(0.92), AppTheme.accentSecondary.opacity(0.9)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 54, height: 54)
+
+                        Image(systemName: "creditcard.and.123")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Advance Credit")
+                            .font(.system(size: 22, weight: .semibold))
+                        Text("Log prepaid hours, optional expiry rules, and payment details in one place. TutorTable will keep credit coverage and reporting in step automatically.")
+                            .foregroundStyle(AppTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
                 if appModel.students.isEmpty {
                     EmptyStateView(message: "Create a student before logging advance credit.")
                 } else {
-                    Text("Log prepaid hours here. TutorTable will automatically mark eligible sessions as covered, show which lessons are already paid for, and tell you when the student's credit runs out.")
-                        .foregroundStyle(AppTheme.mutedText)
+                    if stackInternals {
+                        stackedCreditEditorLayout(
+                            selectedStudent: selectedStudent,
+                            standardValue: standardValue,
+                            impliedDiscount: impliedDiscount,
+                            effectiveHourlyRate: effectiveHourlyRate
+                        )
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            wideCreditEditorLayout(
+                                selectedStudent: selectedStudent,
+                                standardValue: standardValue,
+                                impliedDiscount: impliedDiscount,
+                                effectiveHourlyRate: effectiveHourlyRate
+                            )
 
-                    Group {
-                        if stackInternals {
-                            VStack(alignment: .leading, spacing: 18) {
-                                creditEditorFields(standardValue: standardValue)
-                                creditSnapshotCard(
-                                    selectedStudent: selectedStudent,
-                                    standardValue: standardValue,
-                                    impliedDiscount: impliedDiscount,
-                                    effectiveHourlyRate: effectiveHourlyRate
-                                )
-                            }
-                        } else {
-                            HStack(alignment: .top, spacing: 18) {
-                                creditEditorFields(standardValue: standardValue)
-                                creditSnapshotCard(
-                                    selectedStudent: selectedStudent,
-                                    standardValue: standardValue,
-                                    impliedDiscount: impliedDiscount,
-                                    effectiveHourlyRate: effectiveHourlyRate
-                                )
-                            }
+                            stackedCreditEditorLayout(
+                                selectedStudent: selectedStudent,
+                                standardValue: standardValue,
+                                impliedDiscount: impliedDiscount,
+                                effectiveHourlyRate: effectiveHourlyRate
+                            )
                         }
                     }
                 }
@@ -876,21 +913,97 @@ struct PaymentsView: View {
         .frame(maxWidth: .infinity, alignment: .top)
     }
 
+    @ViewBuilder
+    private func wideCreditEditorLayout(
+        selectedStudent: Student?,
+        standardValue: Double,
+        impliedDiscount: Double,
+        effectiveHourlyRate: Double
+    ) -> some View {
+        HStack(alignment: .top, spacing: 18) {
+            creditEditorFields(standardValue: standardValue)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            creditSnapshotCard(
+                selectedStudent: selectedStudent,
+                standardValue: standardValue,
+                impliedDiscount: impliedDiscount,
+                effectiveHourlyRate: effectiveHourlyRate
+            )
+            .frame(width: 320, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private func stackedCreditEditorLayout(
+        selectedStudent: Student?,
+        standardValue: Double,
+        impliedDiscount: Double,
+        effectiveHourlyRate: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            creditEditorFields(standardValue: standardValue)
+            creditSnapshotCard(
+                selectedStudent: selectedStudent,
+                standardValue: standardValue,
+                impliedDiscount: impliedDiscount,
+                effectiveHourlyRate: effectiveHourlyRate
+            )
+        }
+    }
+
     private func creditEditorFields(standardValue: Double) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker("Student", selection: Binding(
-                get: { creditDraft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
-                set: { creditDraft.studentID = $0 }
-            )) {
-                ForEach(appModel.studentsSorted) { student in
-                    Text(student.fullName).tag(student.id)
+        VStack(alignment: .leading, spacing: 18) {
+            PaymentFieldCard(title: "Student") {
+                Picker("Student", selection: Binding(
+                    get: { creditDraft.studentID ?? appModel.studentsSorted.first?.id ?? UUID() },
+                    set: { creditDraft.studentID = $0 }
+                )) {
+                    ForEach(appModel.studentsSorted) { student in
+                        Text(student.fullName).tag(student.id)
+                    }
                 }
             }
 
-            DatePicker("Payment date", selection: $creditDraft.purchasedAt)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 220, maximum: 360), spacing: 14)],
+                spacing: 14
+            ) {
+                PaymentFieldCard(title: "Payment Date", minHeight: 112) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        DatePicker(
+                            "Payment date",
+                            selection: $creditDraft.purchasedAt,
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                    }
+                }
 
-            HStack(spacing: 14) {
-                PaymentFieldCard(title: "Hours Bought") {
+                PaymentFieldCard(title: "Expiration", minHeight: 112) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Set expiration date", isOn: expirationToggleBinding)
+
+                        if creditDraft.hasExpiration {
+                            DatePicker(
+                                "Expiration date",
+                                selection: expirationDateBinding,
+                                in: Calendar.current.startOfDay(for: creditDraft.purchasedAt)...,
+                                displayedComponents: .date
+                            )
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                        } else {
+                            Text("No expiration")
+                                .foregroundStyle(AppTheme.mutedText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 4)
+                        }
+                    }
+                }
+
+                PaymentFieldCard(title: "Hours Bought", minHeight: 112) {
                     TextField(
                         "0.00",
                         value: $creditDraft.purchasedHours,
@@ -899,7 +1012,7 @@ struct PaymentsView: View {
                     .textFieldStyle(.roundedBorder)
                 }
 
-                PaymentFieldCard(title: "Amount Paid") {
+                PaymentFieldCard(title: "Amount Paid", minHeight: 112) {
                     TextField(
                         "0.00",
                         value: $creditDraft.amountPaid,
@@ -909,38 +1022,36 @@ struct PaymentsView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Payment note")
-                    .font(.headline)
+            PaymentFieldCard(title: "Payment Note") {
                 TextEditor(text: $creditDraft.note)
-                    .frame(minHeight: 112)
+                    .frame(minHeight: 118)
                     .padding(8)
                     .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(AppTheme.panelBackgroundSoft)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(AppTheme.panelBackground)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .stroke(AppTheme.panelBorder, lineWidth: 1)
                     )
             }
 
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 10
+                spacing: 12
             ) {
-                paymentActionButton("Set Standard Price") {
+                paymentActionButton("Set Standard Price", systemImage: "equal.circle", style: .secondary) {
                     creditDraft.amountPaid = standardValue
                 }
                 .disabled(creditDraft.studentID == nil || creditDraft.purchasedHours <= 0)
 
-                paymentActionButton("New Credit Entry") {
+                paymentActionButton("New Credit Entry", systemImage: "plus.circle", style: .secondary) {
                     selectedCreditPurchaseID = nil
                     creditDraft = appModel.newCreditPurchaseDraft()
                 }
                 .disabled(appModel.students.isEmpty)
 
-                paymentActionButton("Delete Credit Entry") {
+                paymentActionButton("Delete Credit Entry", systemImage: "trash", style: .destructive) {
                     guard let selectedCreditPurchaseID else {
                         return
                     }
@@ -950,7 +1061,7 @@ struct PaymentsView: View {
                 }
                 .disabled(selectedCreditPurchaseID == nil)
 
-                paymentActionButton("Save Credit Entry") {
+                paymentActionButton("Save Credit Entry", systemImage: "checkmark.circle.fill", style: .accent) {
                     if let savedPurchase = appModel.saveCreditPurchase(creditDraft) {
                         selectedCreditPurchaseID = savedPurchase.id
                         creditDraft = CreditPurchaseDraft(purchase: savedPurchase)
@@ -968,39 +1079,85 @@ struct PaymentsView: View {
         impliedDiscount: Double,
         effectiveHourlyRate: Double
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Payment Snapshot")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Payment Snapshot")
+                    .font(.system(size: 18, weight: .semibold))
 
-            PaymentInfoRow(
-                label: "Standard value",
-                value: AppFormat.currency(standardValue)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(AppFormat.currency(creditDraft.amountPaid))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                    Spacer()
+                    Text(AppFormat.hours(creditDraft.purchasedHours))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
+
+                Text(creditDraft.expirationDate.map { "Expires \(AppFormat.shortDateFormatter.string(from: $0))" } ?? "No expiration date")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(creditDraft.expirationDate == nil ? AppTheme.mutedText : AppTheme.accent)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [AppTheme.accent.opacity(0.20), AppTheme.panelBackgroundSoft],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             )
-            PaymentInfoRow(
-                label: "Implied discount",
-                value: AppFormat.currency(impliedDiscount)
-            )
-            PaymentInfoRow(
-                label: "Effective hourly",
-                value: creditDraft.purchasedHours > 0 ? AppFormat.currency(effectiveHourlyRate) : "Not set"
-            )
-            PaymentInfoRow(
-                label: "Selected student rate",
-                value: selectedStudent.map { AppFormat.currency($0.hourlyRate) } ?? "Not set"
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
             )
 
-            Text("Set the number of hours and the total amount collected. Any difference from the standard value is treated as the discount automatically.")
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                spacing: 10
+            ) {
+                CreditSnapshotMetricCard(
+                    title: "Standard",
+                    value: AppFormat.currency(standardValue)
+                )
+                CreditSnapshotMetricCard(
+                    title: "Discount",
+                    value: AppFormat.currency(impliedDiscount)
+                )
+                CreditSnapshotMetricCard(
+                    title: "Hourly",
+                    value: creditDraft.purchasedHours > 0 ? AppFormat.currency(effectiveHourlyRate) : "Not set"
+                )
+                CreditSnapshotMetricCard(
+                    title: "Student Rate",
+                    value: selectedStudent.map { AppFormat.currency($0.hourlyRate) } ?? "Not set"
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                PaymentInfoRow(
+                    label: "Coverage rule",
+                    value: creditDraft.expirationDate == nil ? "Stays active until used" : "Stops after the expiry date"
+                )
+                PaymentInfoRow(
+                    label: "Best for",
+                    value: creditDraft.expirationDate == nil ? "Open-ended prepaid credit" : "Monthly or annual packages"
+                )
+            }
+
+            Text("TutorTable will apply this credit to eligible sessions automatically. If an expiration date is set, future lessons after that day will no longer use this balance.")
                 .foregroundStyle(AppTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: 280, alignment: .leading)
-        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(AppTheme.panelBackgroundSoft)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(AppTheme.panelBackgroundSoft.opacity(0.92))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(AppTheme.panelBorder, lineWidth: 1)
         )
     }
@@ -1032,6 +1189,31 @@ struct PaymentsView: View {
             .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var expirationToggleBinding: Binding<Bool> {
+        Binding(
+            get: { creditDraft.hasExpiration },
+            set: { shouldEnable in
+                if shouldEnable {
+                    creditDraft.expirationDate = defaultCreditExpirationDate()
+                } else {
+                    creditDraft.expirationDate = nil
+                }
+            }
+        )
+    }
+
+    private var expirationDateBinding: Binding<Date> {
+        Binding(
+            get: { creditDraft.expirationDate ?? defaultCreditExpirationDate() },
+            set: { creditDraft.expirationDate = Calendar.current.startOfDay(for: $0) }
+        )
+    }
+
+    private func defaultCreditExpirationDate() -> Date {
+        let baseDate = Calendar.current.startOfDay(for: creditDraft.purchasedAt)
+        return Calendar.current.date(byAdding: .month, value: 1, to: baseDate) ?? baseDate
     }
 }
 
@@ -1581,6 +1763,18 @@ struct CreditPurchaseRow: View {
     let studentName: String
     let isSelected: Bool
 
+    private var expirationSummary: String? {
+        guard let expirationDate = purchase.expirationDate else {
+            return nil
+        }
+
+        let formattedDate = AppFormat.shortDateFormatter.string(from: expirationDate)
+        if purchase.isExpired() {
+            return "Expired \(formattedDate)"
+        }
+        return "Expires \(formattedDate)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1597,6 +1791,12 @@ struct CreditPurchaseRow: View {
             if purchase.discountAmount > 0 {
                 Text("Discount: \(AppFormat.currency(purchase.discountAmount))")
                     .foregroundStyle(.secondary)
+                    .font(.subheadline)
+            }
+
+            if let expirationSummary {
+                Text(expirationSummary)
+                    .foregroundStyle(purchase.isExpired() ? .orange : .secondary)
                     .font(.subheadline)
             }
 
@@ -1635,6 +1835,14 @@ struct StudentCreditStatusRow: View {
             .first
     }
 
+    private var nextCreditExpirationText: String? {
+        guard let nextCreditExpirationDate = status.nextCreditExpirationDate else {
+            return nil
+        }
+
+        return "Next credit expiry: \(AppFormat.shortDateFormatter.string(from: nextCreditExpirationDate))."
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
@@ -1650,9 +1858,22 @@ struct StudentCreditStatusRow: View {
                     } else if status.remainingHours > 0 {
                         Text("No uncovered future lessons yet. \(AppFormat.hours(status.remainingHours)) still available.")
                             .foregroundStyle(.secondary)
+                    } else if status.expiredRemainingHours > 0 {
+                        Text("No active credit remaining.")
+                            .foregroundStyle(.secondary)
                     } else {
                         Text("No advance credit remaining.")
                             .foregroundStyle(.secondary)
+                    }
+
+                    if let nextCreditExpirationText {
+                        Text(nextCreditExpirationText)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if status.expiredRemainingHours > 0 {
+                        Text("\(AppFormat.hours(status.expiredRemainingHours)) expired unused.")
+                            .foregroundStyle(.orange)
                     }
                 }
 
@@ -1764,31 +1985,61 @@ struct PaymentMiniMetric: View {
     }
 }
 
-struct PaymentFieldCard<Content: View>: View {
+struct CreditSnapshotMetricCard: View {
     let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
+    let value: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased())
                 .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(.secondary)
-            content
+                .foregroundStyle(Color.white.opacity(0.46))
+            Text(value)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(AppTheme.panelBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
+        )
+    }
+}
+
+struct PaymentFieldCard<Content: View>: View {
+    let title: String
+    let minHeight: CGFloat?
+    let content: Content
+
+    init(title: String, minHeight: CGFloat? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.minHeight = minHeight
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title.uppercased())
+                .font(.system(size: 11.5, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.5))
+            content
+        }
+        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(AppTheme.panelBackgroundSoft.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(AppTheme.panelBorder, lineWidth: 1)
         )
     }
 }
@@ -1809,26 +2060,72 @@ struct PaymentInfoRow: View {
 }
 
 private extension PaymentsView {
-    func paymentActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+    enum PaymentActionStyle {
+        case secondary
+        case accent
+        case destructive
+    }
+
+    func paymentActionButton(
+        _ title: String,
+        systemImage: String,
+        style: PaymentActionStyle,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: 42)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(AppTheme.panelBackgroundSoft)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(AppTheme.panelBorder, lineWidth: 1)
-                )
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+
+                Text(title)
+                    .font(.system(size: 14.5, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(buttonForegroundColor(for: style))
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(buttonBackground(for: style))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(buttonBorder(for: style), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .appInteractiveButton()
+    }
+
+    private func buttonBackground(for style: PaymentActionStyle) -> Color {
+        switch style {
+        case .secondary:
+            return AppTheme.panelBackgroundSoft
+        case .accent:
+            return AppTheme.accent.opacity(0.92)
+        case .destructive:
+            return Color.red.opacity(0.18)
+        }
+    }
+
+    private func buttonBorder(for style: PaymentActionStyle) -> Color {
+        switch style {
+        case .secondary:
+            return AppTheme.panelBorder
+        case .accent:
+            return AppTheme.accent.opacity(0.95)
+        case .destructive:
+            return Color.red.opacity(0.34)
+        }
+    }
+
+    private func buttonForegroundColor(for style: PaymentActionStyle) -> Color {
+        switch style {
+        case .secondary, .accent, .destructive:
+            return .white
+        }
     }
 }

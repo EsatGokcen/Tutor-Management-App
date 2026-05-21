@@ -384,12 +384,98 @@ struct StudentCreditPurchase: Identifiable, Codable, Equatable {
     let id: UUID
     var studentID: UUID
     var purchasedAt: Date
+    var expirationDate: Date?
     var purchasedHours: Double
     var discountAmount: Double
     var amountPaid: Double
     var note: String
     var createdAt: Date
     var updatedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case studentID
+        case purchasedAt
+        case expirationDate
+        case purchasedHours
+        case discountAmount
+        case amountPaid
+        case note
+        case createdAt
+        case updatedAt
+    }
+
+    init(
+        id: UUID,
+        studentID: UUID,
+        purchasedAt: Date,
+        expirationDate: Date? = nil,
+        purchasedHours: Double,
+        discountAmount: Double,
+        amountPaid: Double,
+        note: String,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.studentID = studentID
+        self.purchasedAt = purchasedAt
+        self.expirationDate = expirationDate
+        self.purchasedHours = purchasedHours
+        self.discountAmount = discountAmount
+        self.amountPaid = amountPaid
+        self.note = note
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        studentID = try container.decode(UUID.self, forKey: .studentID)
+        purchasedAt = try container.decodeIfPresent(Date.self, forKey: .purchasedAt) ?? Date()
+        expirationDate = try container.decodeIfPresent(Date.self, forKey: .expirationDate)
+        purchasedHours = try container.decodeIfPresent(Double.self, forKey: .purchasedHours) ?? 0
+        discountAmount = try container.decodeIfPresent(Double.self, forKey: .discountAmount) ?? 0
+        amountPaid = try container.decodeIfPresent(Double.self, forKey: .amountPaid) ?? 0
+        note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(studentID, forKey: .studentID)
+        try container.encode(purchasedAt, forKey: .purchasedAt)
+        try container.encodeIfPresent(expirationDate, forKey: .expirationDate)
+        try container.encode(purchasedHours, forKey: .purchasedHours)
+        try container.encode(discountAmount, forKey: .discountAmount)
+        try container.encode(amountPaid, forKey: .amountPaid)
+        try container.encode(note, forKey: .note)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+
+    func isAvailable(for sessionDate: Date, calendar: Calendar = .current) -> Bool {
+        guard purchasedAt <= sessionDate else {
+            return false
+        }
+
+        guard let expirationDate else {
+            return true
+        }
+
+        return calendar.startOfDay(for: sessionDate) <= calendar.startOfDay(for: expirationDate)
+    }
+
+    func isExpired(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let expirationDate else {
+            return false
+        }
+
+        return calendar.startOfDay(for: referenceDate) > calendar.startOfDay(for: expirationDate)
+    }
 }
 
 struct StudentDraft {
@@ -583,6 +669,7 @@ struct CreditPurchaseDraft {
     var id: UUID?
     var studentID: UUID?
     var purchasedAt: Date = Date()
+    var expirationDate: Date?
     var purchasedHours: Double = 0
     var discountAmount: Double = 0
     var amountPaid: Double = 0
@@ -599,6 +686,7 @@ struct CreditPurchaseDraft {
         id = purchase.id
         studentID = purchase.studentID
         purchasedAt = purchase.purchasedAt
+        expirationDate = purchase.expirationDate
         purchasedHours = purchase.purchasedHours
         discountAmount = purchase.discountAmount
         amountPaid = purchase.amountPaid
@@ -607,7 +695,19 @@ struct CreditPurchaseDraft {
     }
 
     var isValid: Bool {
-        studentID != nil && purchasedHours > 0 && amountPaid >= 0 && discountAmount >= 0
+        studentID != nil &&
+        purchasedHours > 0 &&
+        amountPaid >= 0 &&
+        discountAmount >= 0 &&
+        normalizedExpirationDate.map { $0 >= Calendar.current.startOfDay(for: purchasedAt) } != false
+    }
+
+    var hasExpiration: Bool {
+        expirationDate != nil
+    }
+
+    var normalizedExpirationDate: Date? {
+        expirationDate.map { Calendar.current.startOfDay(for: $0) }
     }
 
     func standardValue(for student: Student?) -> Double {
@@ -623,6 +723,7 @@ struct CreditPurchaseDraft {
             id: id ?? UUID(),
             studentID: studentID ?? UUID(),
             purchasedAt: purchasedAt,
+            expirationDate: normalizedExpirationDate,
             purchasedHours: purchasedHours,
             discountAmount: impliedDiscount(for: student),
             amountPaid: amountPaid,
@@ -797,6 +898,8 @@ struct StudentCreditStatus: Identifiable {
     let remainingHours: Double
     let totalAmountPaid: Double
     let totalDiscountAmount: Double
+    let expiredRemainingHours: Double
+    let nextCreditExpirationDate: Date?
     let coveredSessions: [LessonSession]
     let uncoveredSessions: [LessonSession]
     let purchases: [CreditPurchaseUsage]

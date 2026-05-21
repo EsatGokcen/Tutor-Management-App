@@ -1122,6 +1122,7 @@ final class AppModel: ObservableObject {
             .union(Set(creditPurchases.map(\.studentID)))
 
         var statuses: [UUID: StudentCreditStatus] = [:]
+        let now = Date()
 
         for studentID in knownStudentIDs {
             let studentName = student(for: studentID)?.fullName ?? "Unknown Student"
@@ -1155,7 +1156,7 @@ final class AppModel: ObservableObject {
                 }
 
                 let eligiblePurchaseIndices = purchaseStates.indices.filter { index in
-                    purchaseStates[index].purchase.purchasedAt <= session.startAt &&
+                    purchaseStates[index].purchase.isAvailable(for: session.startAt) &&
                     purchaseStates[index].remainingHours > 0.0001
                 }
 
@@ -1198,14 +1199,31 @@ final class AppModel: ObservableObject {
                 }
                 .sorted { $0.purchase.purchasedAt > $1.purchase.purchasedAt }
 
+            let activeRemainingHours = purchaseUsage.reduce(0.0) { partial, usage in
+                partial + (usage.purchase.isExpired(referenceDate: now) ? 0 : usage.remainingHours)
+            }
+            let expiredRemainingHours = purchaseUsage.reduce(0.0) { partial, usage in
+                partial + (usage.purchase.isExpired(referenceDate: now) ? usage.remainingHours : 0)
+            }
+            let nextCreditExpirationDate = purchaseUsage
+                .filter {
+                    $0.remainingHours > 0.0001 &&
+                    !$0.purchase.isExpired(referenceDate: now) &&
+                    $0.purchase.expirationDate != nil
+                }
+                .compactMap(\.purchase.expirationDate)
+                .min()
+
             statuses[studentID] = StudentCreditStatus(
                 studentID: studentID,
                 studentName: studentName,
                 totalPurchasedHours: studentPurchases.reduce(0) { $0 + $1.purchasedHours },
                 usedHours: purchaseUsage.reduce(0) { $0 + $1.usedHours },
-                remainingHours: purchaseUsage.reduce(0) { $0 + $1.remainingHours },
+                remainingHours: activeRemainingHours,
                 totalAmountPaid: studentPurchases.reduce(0) { $0 + $1.amountPaid },
                 totalDiscountAmount: studentPurchases.reduce(0) { $0 + $1.discountAmount },
+                expiredRemainingHours: expiredRemainingHours,
+                nextCreditExpirationDate: nextCreditExpirationDate,
                 coveredSessions: coveredSessions.sorted { $0.startAt < $1.startAt },
                 uncoveredSessions: uncoveredSessions.sorted { $0.startAt < $1.startAt },
                 purchases: purchaseUsage
